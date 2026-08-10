@@ -1,0 +1,39 @@
+RFE MILESTONE NOTE
+
+Component:
+UI Baseline & Interaction Harness
+
+Status:
+VERIFIED
+
+WHAT IT IS
+The approved RFE interface is now a state-driven interaction harness. Thread modules are independent application instances with canonical parameters, positions, selection, ports and grouping accents. Thread connections are committed routing objects rather than decorative lines. The Inspector, module cards and Diagnostics are views onto the same application state.
+
+WHY IT EXISTS
+This layer proves the application shell can safely support later audio and simulation systems without coupling the approved UI to unfinished engines. It provides reliable interaction, routing, timing, cleanup and workload evidence before sound generation is introduced.
+
+IMPLEMENTED DECISIONS
+- One reducer-owned canonical application state governs modules, parameters, selection, positions, Threads, controls, diagnostics and test-session timing.
+- Inspector edits update the selected module instance directly; switching instances preserves independent values.
+- Modules support pointer movement. Committed Thread geometry follows endpoints continuously.
+- Output-to-input routing supports deliberate creation, validation, selection and Delete/Backspace or Inspector removal.
+- Future modules remain selectable for inspection but reject controls and connections.
+- Active sliders, selectors, segmented controls, toggles, tabs, view controls, themes, layouts, presets and session actions are wired to state.
+- Diagnostics report actual active module count, committed Thread count, selected object, state updates and elapsed session time.
+- Elapsed time is derived from performance.now() and is therefore monotonic rather than frame- or callback-counted.
+- RFE_32x32_Benchmark is a controlled workload fixture because module creation/removal is not exposed by the approved UI.
+- The 15-minute live benchmark completed at 15:24 with 32 modules, 32 committed Threads, one selected module, 764 state updates, zero recorded consistency errors and no browser console warnings/errors.
+- A focused Playwright journey challenges timer behavior, independent module edits, movement, live Thread geometry, connection creation/deletion, active controls, future-state restrictions and Diagnostics coherence.
+- An axe-core browser smoke check blocks serious or critical accessibility violations. GitHub Actions runs this alongside the build, typecheck and lint checks.
+- `npm run test:stress-ui` verifies the 32-module / 32-Thread fixture and prints the concise manual soak procedure; the long soak intentionally remains outside CI.
+
+OUTSTANDING
+- Focus is not present in the approved repository and was not invented for this milestone.
+- Free window movement, resizing, minimising and closing are not implemented; their visible controls are explicitly disabled and labelled unavailable.
+- Module creation/removal is not exposed in the approved interface. Lifecycle cleanup is covered for Threads and restored-state orphan filtering; module lifecycle belongs to a future explicitly designed surface.
+
+DEPENDENCIES / NOTES
+- No audio engine, scheduler, sample playback, audio clock or particle engine is present.
+- The UI Workshop remains development-only and separate from canonical application interaction state.
+- The benchmark preset is intended for repeatable UI workload testing, not as an end-user project preset.
+- The quality gate requires Node.js 22, pnpm, Chromium installed by Playwright, and standard GitHub-hosted runners. No secrets or external services are required.

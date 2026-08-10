@@ -1,0 +1,40 @@
+name: UI Quality Gate
+
+on:
+  push:
+    branches: [milestone/ui-interaction-harness]
+  pull_request:
+
+jobs:
+  ui-quality-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out milestone
+        uses: actions/checkout@v4
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.16.0
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Install Chromium
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Build, typecheck and lint
+        run: pnpm run check
+      - name: Run focused browser and accessibility gate
+        run: pnpm exec playwright test
+      - name: Upload failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-quality-gate-evidence
+          path: |
+            playwright-report/
+            test-results/
+          if-no-files-found: ignore
