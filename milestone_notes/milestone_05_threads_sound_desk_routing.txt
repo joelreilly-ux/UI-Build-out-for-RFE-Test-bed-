@@ -1,0 +1,80 @@
+RFE MILESTONE NOTE
+
+Component:
+Milestone 05 — Threads → Sound Desk Channel Routing + Grid Plotter
+
+Status:
+COMPLETE — 2026-08-11 — user-approved baseline
+
+OWNERSHIP
+- Threads AppState owns stable Thread-channel identity, channel existence and explicit module-to-channel-output terminal connections.
+- `getIncomingChannels` derives complete, incomplete and unused arrival states directly from that source data.
+- Sound Desk owns only channel-to-coordinate assignments through the existing spatial-routing reducer.
+- Visualiser remains read-only and renders the same authoritative spatial-routing state.
+- UI selection and proposed-coordinate state are transient controls only. No audio-processing state has been introduced.
+
+THREADS OUTPUT TERMINALS
+- Five stable channels, CH 01 through CH 05, terminate at explicit far-right output terminals aligned to the five established horizontal bands.
+- Terminal wires are real source records, separate from ordinary module-to-module Threads but owned by the same Threads reducer.
+- A completed terminal can be disconnected to create an ordinary incomplete state, then reconnected by selecting a valid module output and the incomplete terminal.
+- Deleting a terminal source removes its terminal connection while retaining the stable Thread channel, producing incomplete rather than faulty state.
+
+CHANNEL AVAILABILITY
+- Default population: five complete/routable channels and one additional unused capacity position.
+- The sixth position proves five is a minimum test population rather than a model maximum; channel definitions remain array-based and extensible.
+- Complete channels are selectable in Sound Desk. Incomplete and unused positions remain visible, labelled, and cannot be selected as plotting sources.
+- If a previously plotted channel loses terminal completeness, the shell removes its spatial assignment so Sound Desk and Visualiser cannot show a stale routable signal.
+
+SOUND DESK
+- A restrained Channel Rail sits above the main routing instrument and presents complete, incomplete and unused semantics with accessible names.
+- The main instrument combines the canonical 5 × 5 grid at approximately 45% width with the neighbouring Channel Plotter.
+- Workflow: select a routable rail channel, select a grid coordinate, review the proposed/current relationship, then Plot route.
+- Replotting replaces the selected channel's previous coordinate with no duplicate or stale node.
+- Unplot removes only the spatial assignment; the Thread channel and output terminal remain intact.
+- The plotted-channel overview uses stable per-channel rows designed to accept lightweight Milestone 06 controls without redesigning the list.
+- A collapsed, non-functional ORCHESTRA / ADVANCED boundary reserves the later structural location without adding controls.
+
+VISUALISER
+- The existing inspection toggle and canonical SpatialGrid renderer are retained.
+- Plots, replots and unplots appear automatically from the same spatial-routing state. Visualiser has no editing controls or assignment copy.
+
+RESPONSIVE BEHAVIOUR
+- Desktop retains the 45/55 grid-to-Plotter relationship.
+- Tablet stacks the connected grid and Plotter inside one bordered instrument.
+- Compact widths keep the square grid, horizontally scrollable Channel Rail and concise Plotter rows without hover-only interaction.
+
+APPROVED THREADS DENSITY ADJUSTMENT
+- Light Utility, Dark Utility, Spacious Light and Compact now share 135px node width, 48px minimum node height, 8px internal node padding and 12px workspace padding.
+- This incorporates the user-approved Workshop configuration into the repository baseline so it survives reload and reset.
+- Each style retains its established palette, typography and broader layout character; Milestone 05 routing behavior is unchanged.
+- Sound Desk and Visualiser now use the same compact window-titlebar language as Threads; their oversized placeholder headings and explanatory sentences were removed.
+- Dark-mode scrollbars now use the canvas and node-border palette instead of bright native tracks.
+- The dark application root also declares `color-scheme: dark`, allowing Safari to render its native overlay scrollbars correctly when WebKit ignores custom scrollbar paint.
+- All Inspector subsections now start collapsed across module, batch and Thread-connection views and require explicit expansion.
+- Left and right workspace-navigation tabs now expand inward from 48px to 132px, preventing destination labels or arrows from wrapping or clipping at either viewport edge.
+- Thread output terminals have increased right inset and a discreet internal disconnect control; terminal Thread geometry follows the new port position.
+- Sound Desk and Visualiser outer/inspection padding was reduced by approximately 40%. Sound Desk now scrolls its routing instrument when needed, and the Visualiser inspection grid is explicitly square.
+
+FUTURE AUDIO BOUNDARY
+- Stable channel definitions, source availability selectors and spatial assignments are pure data modules independent of component mount state.
+- Milestone 06 can consume channel identity, routability and coordinate state without moving those concepts into an audio component.
+- No oscillator, gain, level, meter, playback, Web Audio or spatial-audio implementation exists.
+
+KNOWN LIMITATIONS / CONCERNS
+- The five-band Threads canvas is intentionally dense. Terminal integration was kept small; broader Thread layout refinement is deferred.
+- The default five-channel demonstration reuses existing module outputs. User-facing channel creation/removal beyond the default source fixture is deferred.
+- Stacked coordinates remain data-compatible but have no dedicated stacked-node interaction or management UI.
+- The benchmark preset intentionally has no production channel-output fixture; it remains a module/Thread stress surface.
+
+VERIFICATION
+- TypeScript: PASS
+- ESLint: PASS
+- Production build: PASS
+- Model/render/configuration tests: PASS, 28/28
+- Browser interaction/navigation/routing tests: PASS, 6/6
+- Existing Threads journey and Thread endpoint geometry: covered by the retained browser gate
+- Milestone 03 navigation/shared timer: covered by the retained browser gate
+- Accessibility serious/critical scan: PASS
+
+STOP BOUNDARY
+Milestone 05 stops at explicit Thread channel outputs, derived availability, Channel Rail, Channel Plotter, five-channel spatial routing, Visualiser observation and verification. Milestone 06 audio work has not begun.
