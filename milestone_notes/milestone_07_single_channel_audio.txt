@@ -1,0 +1,113 @@
+# Milestone 07 — Single-channel audible signal test
+
+## Status
+
+Implementation and developer-side browser verification are complete. Automated tests exercise the Web Audio lifecycle and analyser-backed UI, but they do not prove what a human hears. Final headphone/speaker acceptance remains with the user. Milestone 08 has not begun, and nothing has been merged or pushed.
+
+## 1. Files modified
+
+- `app/audio-runtime.ts` (new)
+- `app/page.tsx`
+- `app/globals.css`
+- `tests/audio-runtime.test.mjs` (new)
+- `tests/rendered-html.test.mjs`
+- `e2e/ui-quality-gate.spec.ts`
+
+The combined 06–07 batch also contains the previously reviewed Milestone 06 edits listed in `milestone_06_threads_optimisation.txt`.
+
+## 2. Audio-runtime architecture
+
+The authoritative audio engine is the module-level `applicationAudioRuntime` singleton in `app/audio-runtime.ts`. Ownership is deliberately split:
+
+`CH 01 source → CH 01 envelope/gain/analyser → shared master gain → AudioContext destination`
+
+Application-level ownership: one lazily created AudioContext, one shared master gain/output connection, application shutdown, and diagnostics. Channel-level ownership: oscillator, source envelope, channel gain, analyser, channel parameters, status, and channel cleanup.
+
+## 3. Audio-context lifecycle strategy
+
+The context and shared master graph are created only after the explicit Start gesture. They are resumed when needed and survive source stops, CH 01 disposal, workspace navigation, and UI observer remounts. Only explicit application-level shutdown closes the context. Initialisation failure is shown to the user and a later Start can retry.
+
+## 4. Oscillator implementation
+
+CH 01 uses one native Web Audio sine oscillator. Start is idempotent while active. Stop ramps the source envelope down, schedules the oscillator to stop, and disconnects only source-owned nodes. Restart creates one new channel source while retaining the shared runtime and channel processing graph.
+
+## 5. Frequency control
+
+The accessible CH 01 range input covers 40–2000 Hz and defaults to 78 Hz. It displays the current value in Hz. Dedicated −/+ buttons provide exact 1 Hz adjustments without relying on fine slider movement. Active updates use AudioParam smoothing and do not recreate the oscillator.
+
+## 6. Level control
+
+The compact rotary/hairpin-style control is an accessible range input with visible percentage output. It defaults to 20% and updates the channel gain without rebuilding any graph nodes.
+
+## 7. Gain and safety approach
+
+Conservative staging uses a maximum channel gain of 0.2, a shared master gain of 0.8, a 20% initial channel setting, and 20 ms parameter/envelope ramps. No limiter, compressor, EQ, effects, panning, or mastering chain was added. Listening should still begin at a conservative device/headphone volume.
+
+## 8. Monitor real-signal integration
+
+When CH 01 is focused, Monitor reports SINE, the live frequency, LEVEL percentage, and ACTIVE/CENTRED or SILENT. These values are subscribed from the authoritative runtime rather than duplicated placeholder state.
+
+## 9. Waveform/analyser implementation
+
+Each channel owns one analyser. The canvas trace reads actual time-domain analyser samples only while the source is active. Its requestAnimationFrame loop is cancelled while stopped or unmounted; the UI then presents an explicit NO SIGNAL state. The waveform is not the sole audio-state indicator.
+
+## 10. Workspace-navigation behaviour
+
+Audio intentionally continues when navigating Threads → Sound Desk → Visualiser → Threads. Navigation does not create a new context, master graph, channel graph, analyser, or oscillator. Grid coordinates remain logical routing state only; output stays centred and neither X nor Y affects sound.
+
+## 11. Duplicate-instance protection
+
+The singleton runtime outlives transient UI observers, and channel start checks for an existing active source. Parameter changes never create sources. Diagnostics and browser tests assert one master, one channel graph, and one active source through navigation; a stop/restart changes only the source creation count.
+
+## 12. Disposal and cleanup strategy
+
+Stopping CH 01 stops/disconnects its oscillator and envelope but preserves reusable channel processing. Disposing CH 01 stops its source and disconnects its channel analyser/gain only. It never closes the AudioContext, replaces the master, or touches another channel. Application shutdown is the sole operation allowed to dispose shared infrastructure.
+
+## 13. Diagnostics
+
+Existing diagnostics were preserved. The audio runtime adds context state, channel availability/status, active source count, runtime/master/channel/source creation counts, source/channel disposal counts, and concise failure state. A development inspection handle is exposed at `window.__rfeAudioRuntime`; normal Monitor remains user-focused.
+
+## 14. Automated tests added
+
+Six unit lifecycle tests cover lazy infrastructure, singleton master stability, duplicate prevention, parameter updates, waveform data, scoped channel disposal, application shutdown, and retryable initialisation failure. Rendered markup checks cover accessible controls. The Playwright quality gate exercises Start, live Monitor state, real-signal presentation, parameter changes, navigation, Stop, restart, and stable diagnostic counts.
+
+## 15. Complete automated verification
+
+- TypeScript (`tsc --noEmit`): passed
+- ESLint: passed
+- Production build: passed
+- Node test suite: 33/33 passed
+- Playwright/browser quality suite: 8/8 passed, including accessibility checks
+
+## 16. Developer-side manual/browser checks
+
+In the Codex in-app browser, localhost loaded in an honest stopped/NO SIGNAL state. Start changed the UI to the active state; the end-of-check Stop returned it to START SINE and NO SIGNAL. The automated real-browser lifecycle test additionally changed frequency/level, navigated all three workspaces, stopped, restarted, and verified node-creation diagnostics. The tone was stopped before handoff.
+
+No human audible claim is made: Codex cannot listen through the user's headphones/speakers. The brief's audible checks (pitch, loudness, clicks/pops, duplicate tones, longer-run sound quality) remain part of final user acceptance.
+
+## 17. Known audible artefacts or limitations
+
+No artefact was observable programmatically. Very short ramps are used to reduce clicks, but clicks/pops and perceived loudness must be judged by the user. Browser/device gain, speakers, and headphones remain outside application control. One audible channel only is intentional.
+
+## 18. Performance observations
+
+The graph uses one oscillator and one small analyser for CH 01. Canvas work runs only while active and visible. Navigation and parameter changes do not allocate parallel graphs. Automated navigation and rapid-control checks remained responsive with stable creation counters.
+
+## 19. Regressions discovered/fixed
+
+The many-channel sidebar initially allowed its grid rows to shrink into clipped strips, hiding labels and remove controls. The list now owns the available flexible height, scrolls independently, and retains full-height channel fixtures; browser coverage adds 24 channels and removes CH 24. Channel numbering also no longer retains a lifetime high-water mark after the final channel is removed: an empty workspace restarts at CH 01, while a non-empty workspace allocates one above its greatest active channel (for example, 01/05/09 → 10). During implementation, AudioContext typing and subscription-cleanup typing were also corrected before clean verification. Existing Milestones 01–06 regression coverage remains passing.
+
+## 20. Blockers
+
+No implementation blocker. User headphone/speaker acceptance is the remaining stop gate; multi-channel work must not begin until approval.
+
+## 21. Exact local/Git state
+
+- Worktree: `/Users/requiredrequired/Documents/Codex/Test Engine. Milestones 06-07`
+- Branch: `local/milestones-06-07`
+- Recovery/approved baseline commit: `29304875827e4cdc006765c898186ae0004853fa` (Milestone 05)
+- Combined Milestone 06–07 changes: local and uncommitted
+- Merge/push/publish: not performed
+- Milestone 08: not started
+
+Final user approval is required before any repository reconciliation or baseline advance.

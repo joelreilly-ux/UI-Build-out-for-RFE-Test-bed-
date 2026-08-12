@@ -24,13 +24,17 @@ pnpm test
 
 ## What is included
 
-- Floating Audio Modules / Threads, Thread Inspector and Diagnostics windows
+- Threads, Thread Inspector and contextual Monitor windows
 - Reusable window, node, slider and diagnostic metric components
 - Centralised visual tokens in `app/globals.css`
 - Representative module graph and routing connections
 - Selectable nodes with shared Inspector state
 - Editable timing and injection controls
-- Engine running/paused state and studio/compact layout switch
+- Dynamic add/remove channel test-bed with scroll-contained large populations
+- One isolated CH 01 sine source with frequency, exact 1 Hz tuning, compact level and Start/Stop controls
+- Real analyser-derived Monitor waveform and active/silent state
+- Shared application audio output separated from channel-owned audio resources
+- Session running/paused state and studio/compact layout switch
 - Responsive tablet and narrow-screen adaptations
 - Development-only UI Workshop with live token editing
 - Baseline, Studio / Spacious and Compact visual presets
@@ -41,11 +45,12 @@ pnpm test
 
 ## Milestone boundaries
 
-This shell intentionally uses mock data. It does not implement an audio engine, simulation engine, persistence, advanced routing gestures, Focus sets, Favourites or Simulation Review.
+The approved baseline includes one real browser-native CH 01 sine test instance. It does not yet implement multiple concurrent audible channels, spatial audio, mixing/distribution, recording or sample playback. It also does not implement a simulation engine, durable persistence, advanced routing gestures, Focus sets, Favourites or Simulation Review.
 
 ## Main editing surfaces
 
 - `app/page.tsx` — data, reusable components, layout and local prototype state
+- `app/audio-runtime.ts` — shared Web Audio infrastructure and isolated channel-instance lifecycle
 - `app/globals.css` — design tokens, window language and responsive behavior
 - `app/ui-config.ts` — typed baseline tokens, presets and CSS-variable mapping
 - `app/ui-workshop.tsx` — development-only visual editing panel

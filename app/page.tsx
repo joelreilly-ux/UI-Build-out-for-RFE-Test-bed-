@@ -8,13 +8,19 @@ import {
   type CSSProperties,
   type PointerEvent,
 } from "react";
+import {
+  AUDIO_FREQUENCY_MAX,
+  AUDIO_FREQUENCY_MIN,
+  applicationAudioRuntime,
+  type AudioChannelSnapshot,
+} from "./audio-runtime";
 import { UIWorkshop } from "./ui-workshop";
 import {
-  CHANNEL_DEFINITIONS,
   getIncomingChannels,
   type ChannelId,
   type ChannelTerminalConnection,
   type IncomingChannel,
+  type ThreadChannel,
 } from "./channel-routing";
 import {
   appReducer,
@@ -56,7 +62,6 @@ import {
   type WorkspaceTransitionDirection,
 } from "./workspace-navigation";
 import {
-  CHANNEL_ACCENT_IDS,
   SPATIAL_COORDINATES,
   coordinateKey,
   coordinateLabel,
@@ -68,10 +73,15 @@ import {
 } from "./spatial-routing";
 
 const APP_SNAPSHOT_KEY = "rfe-interaction-harness-snapshot-v1";
-const navItems = ["Modules", "Threads", "Triggers", "Sample Slots", "Routing"];
 const rootNotes = ["C2", "C3", "C4", "D3", "E3", "G3", "A3"];
 const scales = ["Minor Pentatonic", "Major Pentatonic", "Chromatic", "Dorian"];
 const durations = ["1/16", "1/8", "1/4", "1/2", "1 bar", "10 ms", "250 ms"];
+
+function useAudioChannel(channelId: ChannelId) {
+  const [, setRevision] = useState(0);
+  useEffect(() => applicationAudioRuntime.subscribe(() => setRevision((value) => value + 1)), []);
+  return applicationAudioRuntime.getChannelSnapshot(channelId);
+}
 
 function WindowFrame({ title, className = "", compactControls = false, trailing, children }: {
   title: string;
@@ -185,9 +195,10 @@ function ModuleCard({ module, active, pendingFrom, state, onSelect, onMove, onBe
   );
 }
 
-function ThreadLayer({ connections, terminalConnections, modules, selectedId, canvasSize, nodeWidth, nodeHeight, pendingFrom, draftPoint, onSelect }: {
+function ThreadLayer({ connections, terminalConnections, channels, modules, selectedId, canvasSize, nodeWidth, nodeHeight, pendingFrom, draftPoint, onSelect }: {
   connections: ThreadConnection[];
   terminalConnections: readonly ChannelTerminalConnection[];
+  channels: readonly ThreadChannel[];
   modules: ModuleInstance[];
   selectedId: string | null;
   canvasSize: { width: number; height: number };
@@ -221,13 +232,14 @@ function ThreadLayer({ connections, terminalConnections, modules, selectedId, ca
   } : null;
   const terminalGeometry = (connection: ChannelTerminalConnection) => {
     const source = modules.find((module) => module.id === connection.fromModuleId);
-    const channelIndex = CHANNEL_DEFINITIONS.slice(0, 5).findIndex((channel) => channel.id === connection.channelId);
+    const channelIndex = channels.findIndex((channel) => channel.id === connection.channelId);
     if (!source || channelIndex < 0) return null;
+    const channelCount = Math.max(1, channels.length);
     return {
       x1: source.position.x / 100 * canvasSize.width + nodeWidth,
       y1: source.position.y / 100 * canvasSize.height + nodeHeight / 2,
       x2: canvasSize.width - 72,
-      y2: (channelIndex + .5) / 5 * canvasSize.height,
+      y2: (channelIndex + .5) / channelCount * canvasSize.height,
     };
   };
   return (
@@ -243,7 +255,7 @@ function ThreadLayer({ connections, terminalConnections, modules, selectedId, ca
       })}
       {terminalConnections.map((connection) => {
         const points = terminalGeometry(connection);
-        const channel = CHANNEL_DEFINITIONS.find((item) => item.id === connection.channelId);
+        const channel = channels.find((item) => item.id === connection.channelId);
         const accent = MUTED_ACCENTS.find((item) => item.id === channel?.accentId);
         return points ? <g key={connection.id} className="channel-output-thread" data-channel-output={connection.channelId} style={{ "--channel-color": accent?.value } as CSSProperties}><path className="thread-path" d={path(points)} /></g> : null;
       })}
@@ -291,10 +303,6 @@ function SliderField({ label, value, disabled, onChange }: { label: string; valu
     onChange(Math.max(0, Math.min(100, Math.round((event.clientX - rect.left) / rect.width * 100))));
   };
   return <label className="slider-field"><span><span>{label}</span><output>{value}%</output></span><input disabled={disabled} aria-label={label} type="range" min="0" max="100" value={value} onInput={(event) => onChange(Number(event.currentTarget.value))} onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); updateFromPointer(event); }} onPointerMove={(event) => { if (event.buttons === 1) updateFromPointer(event); }} /></label>;
-}
-
-function Metric({ label, value, unit, accent = false }: { label: string; value: string; unit?: string; accent?: boolean }) {
-  return <div className={`metric ${accent ? "metric-accent" : ""}`}><span className="metric-label">{label}</span><div className="metric-value">{value}<small>{unit}</small></div><div className="metric-bars" aria-hidden="true"><i /><i /><i /><i /><i /><i /><i /><i /></div></div>;
 }
 
 function SpatialGrid({ state, variant, selectedCoordinateKey, onSelectCoordinate }: {
@@ -346,14 +354,14 @@ function ChannelRail({ channels, selectedChannelId, onSelect }: { channels: Inco
         const accent = MUTED_ACCENTS.find((item) => item.id === channel.accentId);
         const channelInk = channel.accentId === "utility-blue" ? "#ffffff" : "#111827";
         const complete = channel.status === "complete";
-        const stateLabel = complete ? "complete and routable" : channel.status === "incomplete" ? "incomplete" : "unused";
+        const stateLabel = complete ? "complete and routable" : "incomplete";
         return <button key={channel.id} className={`channel-rail-node ${channel.status} ${selectedChannelId === channel.id ? "selected" : ""}`} style={{ "--channel-color": accent?.value, "--channel-ink": channelInk } as CSSProperties} disabled={!complete} onClick={() => onSelect(channel)} aria-label={`${channel.label} · ${stateLabel}`} aria-pressed={complete ? selectedChannelId === channel.id : undefined} title={`${channel.label} · ${stateLabel}`}>
-          <span aria-hidden="true">{complete ? channel.shortLabel.padStart(2, "0") : channel.status === "incomplete" ? "/" : ""}</span>
+          <span aria-hidden="true">{complete ? channel.shortLabel.padStart(2, "0") : "/"}</span>
           <small aria-hidden="true">{channel.label}</small>
         </button>;
       })}
     </div>
-    <div className="channel-rail-key" aria-hidden="true"><span><i className="complete" />Routable</span><span><i className="incomplete" />Incomplete</span><span><i className="unused" />Unused</span></div>
+    <div className="channel-rail-key" aria-hidden="true"><span><i className="complete" />Routable</span><span><i className="incomplete" />Incomplete</span></div>
   </section>;
 }
 
@@ -381,7 +389,7 @@ function ChannelPlotter({ incoming, state, selectedChannelId, selectedCoordinate
     </div>
     <div className="plotted-channel-overview" aria-label="Plotted channel overview">
       <div className="plotter-overview-heading"><span>ROUTED CHANNELS</span><small>{state.channels.filter((channel) => channel.assignment).length} plotted</small></div>
-      {incoming.filter((channel) => channel.status !== "unused").map((channel) => {
+      {incoming.map((channel) => {
         const route = state.channels.find((item) => item.id === channel.id);
         const accent = MUTED_ACCENTS.find((item) => item.id === channel.accentId);
         return <div className={`plotter-channel-row ${channel.status}`} data-channel-id={channel.id} key={channel.id} style={{ "--channel-color": accent?.value } as CSSProperties}>
@@ -400,6 +408,7 @@ function SoundDeskWorkspace({ threadsState, state, dispatch }: {
   const incoming = getIncomingChannels(threadsState);
   const [selectedChannelId, setSelectedChannelId] = useState<ChannelId | null>("channel-01");
   const [selectedCoordinateKey, setSelectedCoordinateKey] = useState<string | null>("0,0");
+  const effectiveSelectedChannelId = incoming.some((channel) => channel.id === selectedChannelId) ? selectedChannelId : incoming.find((channel) => channel.status === "complete")?.id ?? null;
   const selectChannel = (channel: IncomingChannel) => {
     if (channel.status !== "complete") return;
     setSelectedChannelId(channel.id);
@@ -408,10 +417,10 @@ function SoundDeskWorkspace({ threadsState, state, dispatch }: {
   };
   return <section className="future-workspace spatial-workspace sound-desk-workspace" aria-labelledby="sound-desk-title" data-workspace-surface="sound-desk">
     <WorkspaceTitlebar id="sound-desk-title" title="Sound Desk / Channel Routing" trailing={<span className="spatial-model-status">{incoming.filter((channel) => channel.status === "complete").length} routable · 25 points</span>} />
-    <ChannelRail channels={incoming} selectedChannelId={selectedChannelId} onSelect={selectChannel} />
+    <ChannelRail channels={incoming} selectedChannelId={effectiveSelectedChannelId} onSelect={selectChannel} />
     <div className="sound-desk-routing-instrument">
       <div className="spatial-grid-panel"><SpatialGrid state={state} variant="sound-desk" selectedCoordinateKey={selectedCoordinateKey} onSelectCoordinate={setSelectedCoordinateKey} /><SpatialOrientation /></div>
-      <ChannelPlotter incoming={incoming} state={state} selectedChannelId={selectedChannelId} selectedCoordinateKey={selectedCoordinateKey} dispatch={dispatch} />
+      <ChannelPlotter incoming={incoming} state={state} selectedChannelId={effectiveSelectedChannelId} selectedCoordinateKey={selectedCoordinateKey} dispatch={dispatch} />
     </div>
     <details className="orchestra-placeholder"><summary>ORCHESTRA / ADVANCED <span>Reserved</span></summary></details>
   </section>;
@@ -432,11 +441,11 @@ function VisualiserWorkspace({ state }: { state: SpatialRoutingState }) {
   </section>;
 }
 
-function ThreadChannelBands() {
+function ThreadChannelBands({ channels }: { channels: readonly ThreadChannel[] }) {
   return <div className="thread-channel-bands" aria-hidden="true">
-    {CHANNEL_ACCENT_IDS.map((accentId, index) => {
-      const accent = MUTED_ACCENTS.find((item) => item.id === accentId);
-      return <div className="thread-channel-band" key={accentId} style={{ "--channel-color": accent?.value } as CSSProperties}><span>{String(index + 1).padStart(2, "0")}</span></div>;
+    {channels.map((channel) => {
+      const accent = MUTED_ACCENTS.find((item) => item.id === channel.accentId);
+      return <div className="thread-channel-band" key={channel.id} style={{ "--channel-color": accent?.value } as CSSProperties}><span>{channel.shortLabel.padStart(2, "0")}</span></div>;
     })}
   </div>;
 }
@@ -444,10 +453,10 @@ function ThreadChannelBands() {
 function ChannelOutputTerminals({ state, dispatch }: { state: AppState; dispatch: React.Dispatch<Parameters<typeof appReducer>[1]> }) {
   const incoming = getIncomingChannels(state);
   return <div className="channel-output-terminals" aria-label="Thread channel output terminals">
-    {incoming.slice(0, 5).filter((channel) => channel.status !== "unused").map((channel, index) => {
+    {incoming.map((channel, index) => {
       const accent = MUTED_ACCENTS.find((item) => item.id === channel.accentId);
       const complete = channel.status === "complete";
-      return <div className={`channel-output-terminal ${complete ? "complete" : "incomplete"}`} data-channel-id={channel.id} key={channel.id} style={{ top: `${(index + .5) / 5 * 100}%`, "--channel-color": accent?.value } as CSSProperties} aria-label={`${channel.label} output ${complete ? "complete" : "incomplete"}`}>
+      return <div className={`channel-output-terminal ${complete ? "complete" : "incomplete"}`} data-channel-id={channel.id} key={channel.id} style={{ top: `${(index + .5) / Math.max(1, incoming.length) * 100}%`, "--channel-color": accent?.value } as CSSProperties} aria-label={`${channel.label} output ${complete ? "complete" : "incomplete"}`}>
         <button className="channel-terminal-input" aria-disabled={complete || !state.pendingConnectionFrom} aria-label={`${channel.label} output terminal ${complete ? "complete" : "incomplete"}`} onClick={(event) => {
           event.stopPropagation();
           if (!complete && state.pendingConnectionFrom) dispatch({ type: "commit-channel-output", channelId: channel.id });
@@ -537,10 +546,109 @@ function Inspector({ state, selectedModule, selectedModules, selectedConnection,
   </div>;
 }
 
+function InputsAndChannels({ state, collapsed, onToggle, dispatch }: {
+  state: AppState;
+  collapsed: boolean;
+  onToggle: () => void;
+  dispatch: React.Dispatch<Parameters<typeof appReducer>[1]>;
+}) {
+  const incoming = getIncomingChannels(state);
+  const audio = useAudioChannel("channel-01");
+  return <aside className={`inputs-sidebar ${collapsed ? "collapsed" : ""}`} aria-label="Inputs and Channels">
+    <header><button className="sidebar-collapse" aria-label={collapsed ? "Expand Inputs and Channels" : "Collapse Inputs and Channels"} aria-expanded={!collapsed} onClick={onToggle}>{collapsed ? "→" : "←"}</button>{!collapsed && <div><strong>INPUTS &amp; CHANNELS</strong><small>INTRODUCE</small></div>}</header>
+    {!collapsed && <>
+      <button className="add-channel-action" onClick={() => dispatch({ type: "add-channel" })}>＋ ADD CHANNEL</button>
+      <div className="input-channel-list" aria-label={`${incoming.length} active channel${incoming.length === 1 ? "" : "s"}`}>
+        {incoming.map((channel) => <div className={`input-channel-fixture ${state.selection?.kind === "channel" && state.selection.id === channel.id ? "selected" : ""}`} key={channel.id} data-channel-id={channel.id}>
+          <div className="input-channel-row">
+            <button className="channel-select" onClick={() => dispatch({ type: "select-channel", channelId: channel.id })} aria-pressed={state.selection?.kind === "channel" && state.selection.id === channel.id}><span>{channel.label}</span><small>{channel.id === "channel-01" ? audio.active ? "SINE · ACTIVE" : "SINE · SILENT" : channel.status === "complete" ? "OUTPUT READY" : "AWAITING OUTPUT"}</small></button>
+            <button className="channel-remove" aria-label={`Remove ${channel.label}`} onClick={() => { if (window.confirm(`Remove ${channel.label} and its downstream route?`)) { applicationAudioRuntime.disposeChannel(channel.id); dispatch({ type: "remove-channel", channelId: channel.id }); } }}>×</button>
+          </div>
+          {channel.id === "channel-01" && <div className="audio-test-controls" aria-label="CH 01 sine signal controls">
+            <div className="audio-state-line" role="status"><span className={audio.active ? "active" : "silent"} /> <b>{audio.active ? "ACTIVE" : audio.availability === "error" ? "ERROR" : "SILENT"}</b><small>{audio.message}</small></div>
+            <div className="frequency-control">
+              <div className="frequency-heading"><span>FREQUENCY</span><output aria-live="polite">{audio.frequency} Hz</output></div>
+              <input aria-label="CH 01 sine frequency" type="range" min={AUDIO_FREQUENCY_MIN} max={AUDIO_FREQUENCY_MAX} step="1" value={audio.frequency} onChange={(event) => applicationAudioRuntime.setFrequency(channel.id, Number(event.target.value))} />
+              <div className="frequency-stepper" aria-label="CH 01 precise frequency controls">
+                <button aria-label="Decrease CH 01 frequency by 1 Hz" disabled={audio.frequency <= AUDIO_FREQUENCY_MIN} onClick={() => applicationAudioRuntime.setFrequency(channel.id, audio.frequency - 1)}>−</button>
+                <small>1 HZ</small>
+                <button aria-label="Increase CH 01 frequency by 1 Hz" disabled={audio.frequency >= AUDIO_FREQUENCY_MAX} onClick={() => applicationAudioRuntime.setFrequency(channel.id, audio.frequency + 1)}>+</button>
+              </div>
+            </div>
+            <label className="level-control"><span>LEVEL</span><div className="level-dial" style={{ "--level-angle": `${-135 + audio.level * 2.7}deg` } as CSSProperties}><i /></div><output>{audio.level}%</output><input aria-label="CH 01 level" type="range" min="0" max="100" step="1" value={audio.level} onChange={(event) => applicationAudioRuntime.setLevel(channel.id, Number(event.target.value))} /></label>
+            <button className={`signal-toggle ${audio.active ? "stop" : "start"}`} onClick={() => { dispatch({ type: "select-channel", channelId: channel.id }); if (audio.active) applicationAudioRuntime.stopChannel(channel.id); else void applicationAudioRuntime.startChannel(channel.id); }}>{audio.active ? "STOP SINE" : "START SINE"}</button>
+          </div>}
+        </div>)}
+      </div>
+      <div className="future-inputs" aria-label="Future source types reserved"><span>SOURCES</span><p>Import File · Mic / Live · Capture / Loop · Saved Sources</p><small>Reserved for a future milestone</small></div>
+    </>}
+  </aside>;
+}
+
+function SignalTrace({ audio }: { audio: AudioChannelSnapshot }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || !audio.active) return;
+    const context = canvas.getContext("2d");
+    if (!context) return;
+    let frame = 0;
+    const draw = () => {
+      const data = applicationAudioRuntime.getWaveform("channel-01");
+      const width = canvas.width;
+      const height = canvas.height;
+      context.clearRect(0, 0, width, height);
+      context.strokeStyle = getComputedStyle(canvas).color;
+      context.lineWidth = 1.5;
+      context.beginPath();
+      if (data) data.forEach((value, index) => {
+        const x = index / Math.max(1, data.length - 1) * width;
+        const y = (0.5 - value * 0.42) * height;
+        if (index === 0) context.moveTo(x, y); else context.lineTo(x, y);
+      });
+      context.stroke();
+      frame = window.requestAnimationFrame(draw);
+    };
+    draw();
+    return () => window.cancelAnimationFrame(frame);
+  }, [audio.active]);
+  return <div className={`signal-monitor ${audio.active ? "signal-active" : ""}`} aria-label={audio.active ? `Real CH 01 signal active at ${audio.frequency} hertz` : "Signal monitor idle; no signal"}>
+    <canvas ref={canvasRef} width="360" height="72" aria-hidden="true" />
+    {!audio.active && <><div className="signal-baseline" aria-hidden="true" /><strong>{audio.availability === "error" ? "AUDIO ERROR" : "NO SIGNAL"}</strong><small>{audio.message}</small></>}
+    {audio.active && <small>REAL SIGNAL · ANALYSER</small>}
+  </div>;
+}
+
+function Monitor({ state, selectedModule, selectedModules, selectedConnection, audio }: {
+  state: AppState;
+  selectedModule: ModuleInstance | null;
+  selectedModules: ModuleInstance[];
+  selectedConnection: ThreadConnection | null;
+  audio: AudioChannelSnapshot;
+}) {
+  const selectedChannel = state.selection?.kind === "channel" ? state.threadChannels.find((channel) => channel.id === state.selection?.id) ?? null : null;
+  const sourceChannel = selectedModule ? state.channelTerminalConnections.find((connection) => connection.fromModuleId === selectedModule.id)?.channelId : null;
+  const currentChannel = selectedChannel ?? state.threadChannels.find((channel) => channel.id === sourceChannel) ?? state.threadChannels[0] ?? null;
+  const display = selectedModule ? getModuleDisplay(selectedModule) : null;
+  const audioFocused = currentChannel?.id === "channel-01" && (selectedChannel?.id === "channel-01" || !selectedModule && !selectedConnection);
+  const focusTitle = audioFocused ? "SINE" : selectedModules.length > 1 ? `${selectedModules.length} NODES` : selectedModule ? selectedModule.title : selectedConnection ? "THREAD" : selectedChannel ? selectedChannel.label : "IDLE";
+  const focusType = audioFocused ? `${audio.frequency} Hz · LEVEL ${audio.level}%` : selectedModule ? selectedModule.type.replaceAll("-", " ").toUpperCase() : selectedConnection ? "COMMITTED CONNECTION" : selectedChannel ? "CHANNEL OUTPUT" : "NO OBJECT SELECTED";
+  const focusDetail = audioFocused ? audio.active ? "ACTIVE · CENTRED OUTPUT" : audio.availability === "error" ? audio.message : "SILENT · READY" : selectedModule && display ? `${display.detail} · ${display.value}` : selectedConnection ? selectedConnection.id : selectedChannel ? (state.channelTerminalConnections.some((connection) => connection.channelId === selectedChannel.id) ? "OUTPUT READY" : "AWAITING OUTPUT") : "Select a node, Thread, or channel";
+  return <div className="monitor-content" role="status" aria-live="polite" aria-label="Selection monitor">
+    <div className="monitor-focus"><span>CURRENT FOCUS</span><strong>{currentChannel ? `${currentChannel.label} / ${String(state.threadChannels.length).padStart(2, "0")}` : "NO CHANNEL"}</strong><small>{focusTitle}</small></div>
+    <div className="monitor-object"><span>OBJECT</span><strong>{focusType}</strong><small>{focusDetail}</small></div>
+    <SignalTrace audio={audio} />
+    <div className="monitor-session"><span>AUDIO</span><strong>{audio.active ? "ACTIVE" : audio.availability === "error" ? "ERROR" : "SILENT"}</strong><small>{audio.active ? `${audio.frequency} Hz · ${audio.level}%` : audio.message}</small></div>
+  </div>;
+}
+
 export default function Home() {
   const isDevelopment = process.env.NODE_ENV === "development";
   const [state, dispatch] = useReducer(appReducer, undefined, createInitialState);
   const [spatialRouting, dispatchSpatialRouting] = useReducer(spatialRoutingReducer, undefined, createInitialSpatialRoutingState);
+  useEffect(() => {
+    dispatchSpatialRouting({ type: "sync-channels", channels: state.threadChannels });
+  }, [state.threadChannels]);
   useEffect(() => {
     const routableIds = new Set(getIncomingChannels(state).filter((channel) => channel.status === "complete").map((channel) => channel.id));
     spatialRouting.channels.forEach((channel) => {
@@ -558,6 +666,9 @@ export default function Home() {
   const [narrowViewport, setNarrowViewport] = useState(false);
   const [draftPoint, setDraftPoint] = useState<{ x: number; y: number } | null>(null);
   const [addModuleType, setAddModuleType] = useState<ModuleTemplateType>("note-length");
+  const [inputsCollapsed, setInputsCollapsed] = useState(false);
+  const [toolbarExpanded, setToolbarExpanded] = useState(false);
+  const audio = useAudioChannel("channel-01");
   const canvasRef = useRef<HTMLDivElement>(null);
   const panDrag = useRef<{ startX: number; startY: number; originX: number; originY: number } | null>(null);
   const userEditedRef = useRef(false);
@@ -567,14 +678,18 @@ export default function Home() {
   const selectedModule = selectedModules.length === 1 ? selectedModules[0] : null;
   const selectedConnection = state.selection?.kind === "connection" ? state.connections.find((connection) => connection.id === state.selection?.id) ?? null : null;
   const elapsedText = formatElapsed(getElapsedMs(state.session, clockNow));
-  const activeModules = state.modules.filter((module) => module.enabled && module.parameters.status === "active").length;
-  const selectedDiagnostic = selectedModules.length > 1 ? `M:${selectedModules.length} selected` : state.selection ? `${state.selection.kind === "module" ? "M" : "T"}:${state.selection.id}` : "None";
   const benchmark = state.modules.length >= 32;
 
   useEffect(() => {
-    const timer = window.setInterval(() => setClockNow(performance.now()), 250);
-    return () => window.clearInterval(timer);
+    (window as Window & { __rfeAudioRuntime?: typeof applicationAudioRuntime }).__rfeAudioRuntime = applicationAudioRuntime;
+    return () => { delete (window as Window & { __rfeAudioRuntime?: typeof applicationAudioRuntime }).__rfeAudioRuntime; };
   }, []);
+
+  useEffect(() => {
+    if (!state.session.running) return;
+    const timer = window.setInterval(() => setClockNow(performance.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, [state.session.running]);
   useEffect(() => {
     if (activeWorkspace !== "threads") return;
     const canvas = canvasRef.current;
@@ -696,10 +811,11 @@ export default function Home() {
     <div className="studio-label"><span className="brand-glyph">RFE</span><span>Prototype Test-Bed</span><span className="workspace-position" aria-live="polite"><b>{activeWorkspaceDefinition.label}</b><small>{String(activeWorkspaceDefinition.position).padStart(2, "0")} / {String(WORKSPACES.length).padStart(2, "0")}</small></span><div className="theme-switch" aria-label="Colour theme"><button className={theme === "light" ? "active" : ""} onClick={() => selectTheme("light")}>Light</button><button className={theme === "dark" ? "active" : ""} onClick={() => selectTheme("dark")}>Dark</button></div><div className="elapsed-readout shell-elapsed-readout" aria-label="Elapsed test session time"><span>ELAPSED</span><b>{elapsedText}</b></div><i className={state.session.running ? "running" : "paused"}>{state.session.running ? "Test session active" : "Test session idle"}</i></div>
     <div key={`${activeWorkspace}-${workspaceTransitionKey}`} className={`workspace-surface ${workspaceTransition ? `workspace-enter-${workspaceTransition}` : ""}`}>
     {activeWorkspace === "threads" ? <div className="studio-arrangement" aria-label="Threads workspace" data-workspace-surface="threads">
-      <WindowFrame title="Audio Modules / Threads" className="main-window" trailing={<span aria-hidden="true" />}>
-        <div className="main-body"><aside className="sidebar"><div className="project-lockup"><strong>RFE</strong><span>Resonant Field Engine</span><small>Interaction Test-Bed</small></div><nav aria-label="Workspace">{navItems.map((item, index) => <button key={item} className={state.activeNav === item ? "active" : ""} onClick={() => dispatch({ type: "set-nav", value: item })}><span>{["⌘", "≋", "ϟ", "⠿", "⌁"][index]}</span>{item}</button>)}</nav><div className="preset-panel"><label className="preset-label" htmlFor="preset-select">Preset</label><select id="preset-select" className="select-control" value={state.presetName === "RFE_32x32_Benchmark" ? "benchmark" : state.presetName.startsWith("RFE_User") ? "saved" : "default"} onChange={(event) => loadPreset(event.target.value)}><option value="default">RFE_Default_Test</option><option value="benchmark">RFE_32x32_Benchmark</option><option value="saved">Saved User Preset</option></select><div className="preset-actions"><button onClick={() => saveSnapshot(false)}>Save</button><button onClick={() => saveSnapshot(true)}>Save as…</button></div></div><button className={`engine-status ${state.session.running ? "running" : ""}`} onClick={() => dispatch({ type: "toggle-session", now: performance.now() })}><i /> {state.session.running ? "Pause Test Session" : "Start Test Session"}</button></aside>
-          <div className="workspace-region"><div className="workspace-toolbar"><div className="tool-cluster" aria-label="Canvas tools"><button className={state.tool === "select" ? "tool-active" : ""} aria-label="Select tool" onClick={() => dispatch({ type: "set-tool", value: "select" })}>↖</button><button className={state.tool === "pan" ? "tool-active" : ""} aria-label="Pan tool" onClick={() => dispatch({ type: "set-tool", value: "pan" })}>✥</button><button className={state.gridVisible ? "tool-active" : ""} aria-label="Toggle grid" aria-pressed={state.gridVisible} onClick={() => dispatch({ type: "toggle-grid" })}>⠿</button></div><span className="workspace-context">{state.activeNav} workspace · {state.statusMessage}</span><div className="session-controls"><button onClick={() => dispatch({ type: "toggle-session", now: performance.now() })}>{state.session.running ? "Pause" : "Start"}</button><button onClick={() => dispatch({ type: "reset-session", now: performance.now() })}>Reset time</button></div><div className="zoom-control"><button aria-label="Zoom out" onClick={() => dispatch({ type: "set-zoom", value: state.zoom - 10 })}>−</button><span>{state.zoom}%</span><button aria-label="Zoom in" onClick={() => dispatch({ type: "set-zoom", value: state.zoom + 10 })}>＋</button></div><div className="layout-switch" aria-label="Layout mode"><button className={state.layout === "studio" ? "active" : ""} onClick={() => dispatch({ type: "set-layout", value: "studio" })}>Studio</button><button className={state.layout === "compact" ? "active" : ""} onClick={() => dispatch({ type: "set-layout", value: "compact" })}>Compact</button></div></div>
-            <div className="workspace-editbar" aria-label="Module editing tools">
+      <WindowFrame title="Threads / Construction" className="main-window" trailing={<span aria-hidden="true" />}>
+        <div className={`main-body ${inputsCollapsed ? "inputs-collapsed" : ""}`}>
+          <InputsAndChannels state={state} collapsed={inputsCollapsed} onToggle={() => setInputsCollapsed((value) => !value)} dispatch={dispatch} />
+          <div className="workspace-region"><div className="workspace-toolbar"><div className="tool-cluster" aria-label="Canvas tools"><button className={state.tool === "select" ? "tool-active" : ""} aria-label="Select tool" onClick={() => dispatch({ type: "set-tool", value: "select" })}>↖</button><button className={state.tool === "pan" ? "tool-active" : ""} aria-label="Pan tool" onClick={() => dispatch({ type: "set-tool", value: "pan" })}>✥</button><button className={state.gridVisible ? "tool-active" : ""} aria-label="Toggle grid" aria-pressed={state.gridVisible} onClick={() => dispatch({ type: "toggle-grid" })}>⠿</button></div><span className="workspace-context">THREAD CONSTRUCTION · {state.statusMessage}</span><div className="session-controls"><button onClick={() => dispatch({ type: "toggle-session", now: performance.now() })}>{state.session.running ? "Pause" : "Start"}</button><button onClick={() => dispatch({ type: "reset-session", now: performance.now() })}>Reset time</button></div><div className="zoom-control"><button aria-label="Zoom out" onClick={() => dispatch({ type: "set-zoom", value: state.zoom - 10 })}>−</button><span>{state.zoom}%</span><button aria-label="Zoom in" onClick={() => dispatch({ type: "set-zoom", value: state.zoom + 10 })}>＋</button></div><div className="layout-switch" aria-label="Layout mode"><button className={state.layout === "studio" ? "active" : ""} onClick={() => dispatch({ type: "set-layout", value: "studio" })}>Studio</button><button className={state.layout === "compact" ? "active" : ""} onClick={() => dispatch({ type: "set-layout", value: "compact" })}>Compact</button></div><button className="toolbar-toggle" aria-expanded={toolbarExpanded} aria-controls="workspace-secondary-tools" onClick={() => setToolbarExpanded((value) => !value)}>{toolbarExpanded ? "Hide tools ↑" : "More tools ↓"}</button></div>
+            {toolbarExpanded && <div id="workspace-secondary-tools" className="workspace-editbar" aria-label="Module editing tools">
               <label><span>Add</span><select aria-label="Module type to add" value={addModuleType} onChange={(event) => setAddModuleType(event.target.value as ModuleTemplateType)}>{MODULE_LIBRARY.map((item) => <option key={item.type} value={item.type}>{item.title}</option>)}</select></label>
               <button onClick={() => dispatch({ type: "add-module", moduleType: addModuleType })}>Add module</button>
               <div className="workspace-width-controls" aria-label="Workspace width controls">
@@ -711,15 +827,17 @@ export default function Home() {
               <button disabled={!selectedModuleIds.length} onClick={() => dispatch({ type: "duplicate-selection" })}>Duplicate selected</button>
               <button disabled={!selectedModuleIds.length} className="danger" onClick={() => dispatch({ type: "delete-selection" })}>Delete selected</button>
               <button disabled={!state.modules.length} className="danger clear-workspace" onClick={() => { if (window.confirm("Clear all modules and Threads from the workspace?")) dispatch({ type: "clear-workspace" }); }}>Clear workspace</button>
-            </div>
+              <label className="toolbar-preset"><span>Preset</span><select aria-label="Preset" value={state.presetName === "RFE_32x32_Benchmark" ? "benchmark" : state.presetName.startsWith("RFE_User") ? "saved" : "default"} onChange={(event) => loadPreset(event.target.value)}><option value="default">RFE_Default_Test</option><option value="benchmark">RFE_32x32_Benchmark</option><option value="saved">Saved User Preset</option></select></label>
+              <button onClick={() => saveSnapshot(false)}>Save</button><button onClick={() => saveSnapshot(true)}>Save as…</button>
+            </div>}
             {/* The canvas is an application interaction surface with pointer panning and Escape cancellation. */}
             {/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions, jsx-a11y/no-noninteractive-tabindex */}
             <div ref={canvasRef} className={`node-canvas ${state.gridVisible ? "" : "no-grid"} ${state.tool === "pan" ? "pan-mode" : ""} ${benchmark ? "benchmark-canvas" : ""}`} role="application" tabIndex={0} aria-label="Audio module routing canvas" onPointerMove={canvasPointerMove} onPointerDown={canvasPointerDown} onPointerUp={() => { panDrag.current = null; }} onKeyDown={(event) => { if (event.key === "Escape") dispatch({ type: "cancel-connection" }); }}>
               <div className="canvas-stage" style={{ ...stageStyle, width: `${state.workspaceWidth}%` }}>
-                <ThreadChannelBands />
+                <ThreadChannelBands channels={state.threadChannels} />
                 {state.workspaceWidth > 100 && <div className="workspace-extension-marker extension-50" style={{ left: `${100 / state.workspaceWidth * 100}%` }}><span>Extension +50%</span></div>}
                 {state.workspaceWidth > 150 && <div className="workspace-extension-marker extension-100" style={{ left: `${150 / state.workspaceWidth * 100}%` }}><span>Extension +100%</span></div>}
-                <ThreadLayer connections={state.connections} terminalConnections={state.channelTerminalConnections} modules={state.modules} selectedId={selectedConnection?.id ?? null} canvasSize={extendedCanvasSize} nodeWidth={nodeWidth * nodeScale} nodeHeight={nodeHeight * nodeScale} pendingFrom={state.pendingConnectionFrom} draftPoint={draftPoint} onSelect={(id) => dispatch({ type: "select-connection", id })} />
+                <ThreadLayer connections={state.connections} terminalConnections={state.channelTerminalConnections} channels={state.threadChannels} modules={state.modules} selectedId={selectedConnection?.id ?? null} canvasSize={extendedCanvasSize} nodeWidth={nodeWidth * nodeScale} nodeHeight={nodeHeight * nodeScale} pendingFrom={state.pendingConnectionFrom} draftPoint={draftPoint} onSelect={(id) => dispatch({ type: "select-connection", id })} />
                 <ChannelOutputTerminals state={state} dispatch={dispatch} />
                 {state.modules.map((module) => <ModuleCard key={module.id} module={module} active={selectedModuleIds.includes(module.id)} pendingFrom={state.pendingConnectionFrom} state={state} onSelect={(additive) => dispatch({ type: "select-module", id: module.id, additive })} onMove={(position) => dispatch({ type: "move-module", id: module.id, position })} onBeginConnection={() => dispatch({ type: "begin-connection", fromModuleId: module.id })} onCommitConnection={() => dispatch({ type: "commit-connection", toModuleId: module.id })} />)}
               </div>
@@ -729,7 +847,7 @@ export default function Home() {
           </div></div>
       </WindowFrame>
       <WindowFrame title="Thread Inspector" className="inspector-window"><Inspector state={state} selectedModule={selectedModule} selectedModules={selectedModules} selectedConnection={selectedConnection} uiConfig={uiConfig} updateParameter={updateParameter} setAccent={(accentId) => selectedModule && dispatch({ type: "set-accent", id: selectedModule.id, accentId })} setHighlightStyle={setHighlightStyle} setHighlightWeight={setHighlightWeight} dispatch={dispatch} /></WindowFrame>
-      <WindowFrame title="Diagnostics" className="diagnostics-window" compactControls><div className="diagnostics-content"><Metric label="Active Modules" value={String(activeModules)} unit={` / ${state.modules.length}`} /><Metric label="Active Threads" value={String(state.connections.length)} unit=" committed" /><Metric label="Selected Object" value={selectedDiagnostic} /><Metric label="State Updates" value={String(state.updateCount)} unit=" actions" /><Metric label="Elapsed Session" value={elapsedText} accent /><div className="diagnostic-footer"><span>Focus&nbsp; Unavailable</span><span>Preset&nbsp; {state.presetName}</span><span>Session&nbsp; {state.session.running ? "ACTIVE" : "IDLE"}</span></div></div></WindowFrame>
+      <WindowFrame title="Monitor" className="diagnostics-window monitor-window" compactControls><Monitor state={state} selectedModule={selectedModule} selectedModules={selectedModules} selectedConnection={selectedConnection} audio={audio} /></WindowFrame>
     </div> : activeWorkspace === "sound-desk" ? <SoundDeskWorkspace threadsState={state} state={spatialRouting} dispatch={dispatchSpatialRouting} /> : <VisualiserWorkspace state={spatialRouting} />}
     </div>
     <WorkspaceNavigation workspace={activeWorkspace} navigate={navigateWorkspace} />

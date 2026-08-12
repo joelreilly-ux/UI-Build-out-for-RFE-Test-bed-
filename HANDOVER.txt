@@ -3,261 +3,258 @@ RFE PROTOTYPE TEST-BED — PROJECT HANDOVER
 1. PROJECT STATE
 
 State:
-- Current milestone: Milestone 05 — Threads → Sound Desk Channel Routing + Grid Plotter.
-- Milestones completed and user-approved: approved UI interaction harness; three-workspace directional shell; canonical Cartesian spatial field; explicit Thread channel outputs; derived channel availability; Sound Desk Channel Rail and Plotter; Visualiser routing inspection.
-- Current development phase: user-approved Milestones 03–05 baseline prepared for repository review. No audio generation, mixing, distribution, or simulation engine phase has begun.
-- Repository baseline: Milestones 03–05 are applied on review branch `agent/milestones-03-05`, based on `milestone/ui-interaction-harness` at `069c7d5`.
-- Handover updated: 2026-08-12
+- Current approved milestone: Milestone 07 — Single-Channel Audible Signal Test.
+- Completed and user-approved batch: Milestones 06–07.
+- Repository baseline being advanced: Milestone 05 at `29304875827e4cdc006765c898186ae0004853fa` to the approved combined Milestone 06–07 commit.
+- Current development phase: one-channel Web Audio validation is complete. Milestones 08–09 have not begun.
+- Handover updated: 2026-08-12 (Europe/London).
 
-The application is a local, editable RFE research-interface prototype with three directionally ordered workspaces: Threads, Sound Desk and Visualiser. Threads owns five stable channel outputs and their actual terminal connectivity. Sound Desk derives incoming availability, authors spatial assignments through a Channel Rail and Plotter, and retains the canonical 5 × 5 grid. Visualiser observes the same routing state. There is no audio, mixer, distribution, particle, field, or simulation engine.
+The application is a local RFE research-interface prototype with three ordered workspaces: Threads, Sound Desk and Visualiser. Threads now begins with one dynamic channel and supports adding/removing channels without a fixed five-channel ceiling. CH 01 owns the first audible sine test instance. Its oscillator, channel gain and analyser feed one shared application-level AudioContext/master output. Sound Desk and Visualiser continue to observe the same routing model; spatial coordinates do not yet alter sound.
 
-Repository reconciliation is complete on the review branch. Merge that reviewed branch before treating the remote default branch as the Milestone 05 baseline.
+The combined Milestone 06–07 batch has passed user listening/interaction acceptance. Do not infer permission to begin Milestone 08 or multi-channel audio until a new brief is supplied.
 
 2. APPROVED BASELINE
 
-Implemented, tested, and approved:
-- One canonical 25-point spatial definition with X/Y axes from -2 through 2, origin at the centre, X increasing rightward, and Y increasing upward.
-- Five stable Thread channels with explicit far-right output terminals and terminal-connection records owned by AppState.
-- Derived complete/incomplete/unused incoming states, with five complete channels by default and one additional unused capacity position proving the architecture is not capped at five.
-- One shell-owned spatial routing reducer with CH 01 at (0,0), CH 02 at (-2,-1), CH 03 at (1,2), CH 04 at (-1,1), CH 05 at (2,-2), and extensible unassigned capacity.
-- Channels 01–05 automatically use five distinct colours from the canonical muted palette: Muted Coral, Warm Stone, Moss Green, Utility Blue and Air Blue.
-- Spatial plot circles are approximately 33% larger than the first Milestone 04 treatment and display bare `x,y` or zero-padded channel numbers without parenthesis characters.
-- The Threads canvas has five equal horizontal channel-reading bands, separated by the same 70%-opacity dashed line treatment. These are visual guides only and do not create module/channel assignment semantics.
-- Channel-owned optional assignments supporting assign, reassign and unassign without duplicated mutable state. Coordinate queries return channel arrays, leaving the model open to future stacked routing.
-- Sound Desk's responsive Channel Rail and unified routing instrument: interactive canonical grid, selected/proposed/current routing summary, Plot/Unplot actions, and per-channel routing overview.
-- Visualiser's default-hidden translucent routing inspection layer, using the same SpatialGrid renderer and authoritative routing state as Sound Desk.
-- Three ordered workspaces: Threads -> Sound Desk -> Visualiser, with current-workspace identification and adjacent-only navigation.
-- Discreet midpoint edge navigation for pointer users, a compact bottom-right touch/compact fallback, destination-specific accessible labels, restrained directional transitions, and reduced-motion handling.
-- Shell-owned Threads reducer state survives workspace changes while only the active workspace surface is rendered. Future heavy workspace processes do not need to stay mounted to preserve navigation state.
-- The elapsed session timer is a shared-shell view of the canonical session state. It remains visible and advances continuously in Threads, Sound Desk and Visualiser without per-workspace timer copies.
-- The lighter utility/studio desktop identity with separate main, Inspector, and Diagnostics windows, plus responsive Studio and Compact arrangements.
-- Central typed design tokens, light and dark baseline themes, visual presets, compact component hierarchy, and approved grouping highlight defaults. The approved configuration revision is `approved-ui-interaction-baseline-2026-08-11-08`.
-- Every approved Threads style—Light Utility, Dark Utility, Spacious Light and Compact—uses 135px-wide nodes, 48px minimum node height, 8px node padding and 12px workspace padding to reduce five-band crowding while retaining each style's colour and broader layout character.
-- Sound Desk and Visualiser use the same compact window-titlebar treatment as Threads. The earlier large placeholder title cards and explanatory descriptions are no longer part of the approved workspace hierarchy.
-- Dark-mode scrollbars are explicitly themed; Thread output terminals sit 28px from the right edge with an inset disconnect control; Sound Desk/Visualiser padding is reduced by roughly 40%; the Sound Desk routing instrument can scroll; and the Visualiser inspection grid must remain square.
-- The dark root declares the native dark colour scheme for Safari overlay scrollbars. Every Inspector subsection is collapsed by default and expands only on request.
-- Pointer workspace-navigation tabs rest at 48px and expand inward to 132px, keeping every destination label and arrow on one line and fully inside the viewport.
-- Development-only RFE UI Workshop controls for palette, typography, geometry, layout, nodes, Threads, Diagnostics focus treatment, grouping-highlight style/weight, palette import/export, favourite swatches, system eyedropper, and imported-image sampling.
-- One reducer-owned AppState for modules, committed Thread connections, selection, module parameters, positions, pending connections, canvas controls, workspace width, preset status, elapsed test session, and Diagnostics update count.
-- Independent module instances with unique identity and parameter memory.
-- Single and additive multi-module selection using Shift, Command, or Control click. Dragging any selected module moves the whole selected batch while preserving relative positions.
-- Enabled module types can be added from MODULE_LIBRARY. Modules can be renamed, duplicated, deleted, selected as a complete set, or cleared from the workspace with confirmation.
-- Batch duplication copies module state and copies only committed Threads whose source and target are both in the selected batch. Module deletion removes every attached Thread so orphan connections are not retained.
-- Deliberate output-to-input Thread creation with validation for unavailable endpoints, self-connections, duplicate connections, and port direction. Threads can be selected and disconnected through the Inspector or Delete/Backspace.
-- Pointer movement of modules with continuously recalculated cubic SVG Thread paths.
-- Thread endpoints use the effective module dimensions in Studio, Compact, and narrow responsive modes. This prevents the visible port gaps that occur if Compact's 90% module scale is ignored.
-- Inspector parameter controls, grouping appearance controls, module lifecycle actions, and native collapsible Inspector sections. Collapsing a section does not discard state.
-- A single workspace-width control that extends 100% -> 150% -> 200%, changes to Retract at maximum width, and retracts 200% -> 150% -> 100%. Extended regions are labelled, horizontally scrollable, and show the live pixel/percentage width.
-- Local default, saved-user, and 32-module/32-Thread benchmark presets; Studio/Compact layout switch; zoom, pan, and grid controls; and monotonic elapsed-session timing based on performance.now().
-- Diagnostics values derived from canonical state: active modules, committed Threads, selected object, state-update count, and elapsed session.
-- Keyboard and accessibility behaviour covered by the approved browser quality gate, including no serious or critical axe violations.
+Milestone 06 — Threads optimisation and audio test-bed preparation:
+- Threads defaults to one routable channel, CH 01, rather than a five-channel fixture.
+- Channels are reducer-owned, dynamically addable/removable and not capped at five.
+- Channel identities are derived from active state: when none remain, the next channel is CH 01; otherwise the next is one above the greatest active number. Example: active 01/05/09 produces 10. Active IDs never duplicate.
+- The Inputs & Channels sidebar contains a dedicated scroll region. Large channel populations retain full-height rows and reachable remove controls without stretching or breaking the workspace.
+- Removing a channel removes only its terminal and downstream spatial assignment; surviving channel identities and routes remain stable.
+- Threads retains explicit output-terminal connectivity and derived complete/incomplete status.
+- The construction workspace, Inspector, tool expansion, Monitor, Sound Desk routing and Visualiser observation remain compatible with dynamic channels.
+- Monitor is contextual and no longer presents placeholder signal truth when real CH 01 data exists.
 
-Experimental/development tooling:
-- The RFE UI Workshop and its browser-local visual preferences are development-only tuning facilities, not canonical application interaction state and not rendered as a production workshop.
-- The 32/32 benchmark is a controlled UI workload fixture, not an end-user project preset or an engine-performance benchmark.
+Milestone 07 — single-channel audible validation:
+- CH 01 produces one native Web Audio sine oscillator through a conservative channel gain and shared application output.
+- Frequency range is 40–2000 Hz, default 78 Hz, displayed in Hz.
+- The slider supports quick sweeps; dedicated minus/plus controls provide exact 1 Hz steps and disable at the range boundaries.
+- Level defaults to 20% and uses a compact rotary/hairpin-style accessible control.
+- Start/Stop is explicit, keyboard accessible and user-gesture initiated. No autoplay occurs.
+- Parameter and source-envelope changes use short ramps to reduce abrupt discontinuities.
+- Monitor reports real CH 01 waveform, frequency, level and ACTIVE/SILENT state from the authoritative audio runtime.
+- The waveform is derived from analyser time-domain data, renders only while active/visible and returns to NO SIGNAL when stopped.
+- Audio intentionally continues during Threads -> Sound Desk -> Visualiser -> Threads navigation. Navigation does not duplicate the source or reconstruct shared output.
+- CH 01 remains centred. X/Y routing has no audio meaning; there is no panning or spatialisation.
+- User acceptance confirmed smooth operation after precision-control, channel-removal and channel-numbering fixes.
 
-Placeholders:
-- Audio In is a visible future-module placeholder. It is selectable for inspection but disabled for control editing and routing.
-- Window close, minimise, expand, and options controls are visible architectural cues but disabled and labelled unavailable.
-- Navigation categories provide active navigation/context state; they are not complete separate application workspaces.
+Retained approved Milestones 03–05 behavior:
+- Ordered adjacent-only Threads -> Sound Desk -> Visualiser navigation with preserved shell state and reduced-motion handling.
+- One canonical Cartesian 5 × 5 spatial definition shared by Sound Desk and Visualiser.
+- Threads-owned channel existence/terminal connectivity and Sound Desk-owned optional coordinate assignments.
+- Canonical reducer state for modules, Threads, selection, parameters, positions, canvas controls, workspace width and elapsed session.
+- Editable module graph, validated connections, cleanup invariants, Inspector controls, Studio/Compact layouts and UI Workshop boundary.
+- Browser accessibility gate with no serious/critical axe violations.
 
-Planned but not implemented:
-- Audio engine, sample playback, audio-clock scheduling, particle/field simulation, and engine integration.
-- Focus sets, product-level Favourites, Simulation Review, advanced routing workflows, and free window management.
-- Durable project persistence, collaboration, authentication, or production backend services.
+3. AUDIO OWNERSHIP MODEL
 
-3. CURRENT ARCHITECTURE
+Authoritative runtime:
+- `app/audio-runtime.ts` exports the module-level `applicationAudioRuntime` singleton.
+- Audio lifecycle correctness does not depend on a React component remaining mounted.
 
-- `app/page.tsx`: shared application shell and workspace components. Milestone 05 components include ChannelOutputTerminals, ChannelRail, ChannelPlotter, interactive SpatialGrid and the retained observational VisualiserWorkspace.
-- `app/channel-routing.ts`: stable channel definitions, terminal/source record types, complete/incomplete/unused availability derivation, and terminal connection validation. It contains no UI or audio runtime.
-- `app/workspace-navigation.ts`: typed workspace order plus pure adjacent-destination and transition-direction helpers. It prevents navigation beyond Threads and Visualiser and rejects non-adjacent transitions.
-- `app/spatial-routing.ts`: canonical axis/coordinate list, channel routing state, coordinate helpers, array-valued occupancy derivation, and assign/unassign reducer.
-- `app/interaction-state.ts`: canonical Threads model, now including stable Thread-channel existence and module-to-channel-terminal connections alongside the existing module and Thread state.
-- `app/ui-config.ts`: typed visual configuration, approved BASELINE_UI_CONFIG, DARK_UI_CONFIG, presets, configuration revision/storage keys, merge logic, and CSS-variable mapping.
-- `app/ui-workshop.tsx`: development-only visual tuning harness. It changes UIConfig and browser-local visual preferences; it must remain separate from AppState and engine-facing behaviour.
-- `app/globals.css`: studio/window/component styling, token fallbacks, grouping highlights, responsive layouts, Compact module scaling, extendable canvas presentation, and accessibility-visible states.
-- `app/layout.tsx`: application metadata and global shell.
-- `tests/interaction-state.test.mjs`: reducer/model tests covering identity, independent parameter state, lifecycle, multi-selection and group movement, duplication cleanup, workspace-width cycling, routing validation, restoration sanitation, benchmark construction, and timing.
-- `tests/rendered-html.test.mjs`: built-worker HTML, approved grouping-highlight baseline, shared workspace renderer and spatial ownership checks.
-- `tests/spatial-routing.test.mjs`: coordinate count/ranges/orientation, fixture independence, reassignment, unassignment and future stacked-routing coverage.
-- `tests/channel-routing.test.mjs`: five-channel concurrency, stable identities, derived availability, terminal completion, source deletion and unplot/source-separation coverage.
-- `e2e/ui-quality-gate.spec.ts`: the focused Playwright journey covering Threads, navigation, shared timer, Sound Desk routing mutation, Visualiser synchronization, responsive grid shape, browser errors, and axe.
-- `playwright.config.ts`: production-server browser test configuration on localhost:3002 with retained failure evidence.
-- `.github/workflows/ui-quality-gate.yml`: frozen pnpm install, Chromium setup, check, Playwright/axe execution, and failure artifact upload.
-- `scripts/prepare-stress-ui.mjs`: validates and describes the manual 32/32 soak fixture.
-- `vite.config.ts`, `worker/index.ts`, and `build/sites-vite-plugin.ts`: vinext/Vite/Cloudflare-worker-compatible build surface.
-- `db/`, `examples/d1/`, `app/chatgpt-auth.ts`, and related starter files are not part of the approved RFE runtime behaviour in this milestone.
+Application-level ownership:
+- One lazily created AudioContext/runtime.
+- One shared master gain connected once to the AudioContext destination.
+- Shared lifecycle coordination and explicit application shutdown.
+- Master/runtime diagnostic counters and runtime error state.
 
-Primary data flow:
-1. Application-shell workspace navigation selects one adjacent active surface from the typed workspace order.
-2. User actions inside Threads dispatch typed AppAction values.
-3. appReducer produces the next canonical Threads AppState, retained by the shell when Threads is not rendered.
-4. Module cards, SVG Threads, Inspector, and Diagnostics render from that same state when Threads is active.
-5. UIConfig is mapped independently to CSS custom properties. Development Workshop changes may persist locally but do not replace AppState.
-6. Saved user presets use browser localStorage and are sanitized before restoration; pending routing and running session state are not restored as active work.
+Channel-level ownership:
+- Oscillator/source.
+- Short source envelope.
+- Channel gain.
+- Channel analyser.
+- Channel parameters, status and scoped cleanup.
 
-4. FILES CHANGED IN THE COMPLETED MILESTONE
+Graph:
+`CHANNEL SOURCE -> SOURCE ENVELOPE -> CHANNEL GAIN -> CHANNEL ANALYSER -> SHARED MASTER -> DESTINATION`
 
-- `app/channel-routing.ts`: added stable channel definitions, terminal connection records, arrival-state derivation and terminal validation.
-- `app/interaction-state.ts`: added reducer-owned Thread channels and output-terminal connectivity, deletion cleanup and snapshot sanitation.
-- `app/spatial-routing.ts`: replaced the visual fixture definition with shared stable channel definitions and retained extensible channel-owned assignments.
-- `app/page.tsx`: added terminal wires/controls, Channel Rail, interactive grid selection, Channel Plotter, route overview and Orchestra / Advanced boundary.
-- `app/globals.css`: added terminal, rail, Plotter and responsive routing-instrument styling.
-- `tests/channel-routing.test.mjs`: added source/terminal/availability and source-versus-unplot coverage.
-- `tests/spatial-routing.test.mjs`, `tests/rendered-html.test.mjs`, and `e2e/ui-quality-gate.spec.ts`: advanced routing, structure and end-to-end acceptance coverage.
-- `milestone_notes/milestone_05_threads_sound_desk_routing.txt`, `QUALITY_GATE.md`, and `HANDOVER.txt`: advanced repository truth through Milestone 05.
+Lifecycle contracts:
+- Changing frequency or level never recreates the master, channel graph or oscillator.
+- Starting an already-active channel is idempotent.
+- Stop disposes only the current oscillator/envelope and leaves reusable channel processing plus shared output intact.
+- Restart creates exactly one new channel source.
+- Channel disposal never closes the AudioContext or replaces/disconnects shared output.
+- Only explicit application shutdown may close shared infrastructure.
+- UI observer remount/navigation does not reconstruct the master graph.
+- Initialisation errors are visible and retryable without crashing unrelated workspaces.
 
-No application files were removed in this milestone.
+This isolation model is the required inheritance boundary for future CH 02, CH 03 and later concurrent instances. Additional audible channels are not implemented yet.
 
-5. IMPORTANT IMPLEMENTATION DECISIONS
+4. CURRENT ARCHITECTURE
 
-- AppState in `interaction-state.ts` is the single source of truth for application interaction. Do not reintroduce parallel component-local copies of module, connection, selection, parameter, lifecycle, workspace-width, or session state.
-- Visual configuration is intentionally separate from AppState. UI Workshop changes must not mutate routing, module logic, Diagnostics truth, session state, or future engine state.
-- Modules and Threads are distinct concepts: module boxes are ModuleInstance objects; routing lines are ThreadConnection objects. Preserve this terminology in state and user-facing actions.
-- A multi-module Selection retains a primary `id` and an optional ordered `ids` list for backward-compatible single-selection behaviour. Use `getSelectedModuleIds` rather than reading `selection.ids` directly.
-- Batch duplication copies only internal selected-to-selected Threads. It must not silently create connections from duplicated modules back to unselected originals.
-- Deleting modules and restored-state sanitation must remove orphaned Threads. Connection endpoint integrity is a reducer/storage contract.
-- Future modules remain inspectable but disabled. They are architectural placeholders, not partially functional modules.
-- Elapsed session time is calculated from monotonic timestamps rather than UI intervals or update counts.
-- The canvas stage is percentage-positioned and may be 100%, 150%, or 200% of the visible canvas width. The width direction is canonical state so one control can complete both extend and retract sequences.
-- Compact mode uses a 90% CSS transform above the narrow breakpoint. ThreadLayer must receive the matching effective node width and height; the narrow responsive media query removes that transform. Changing this without updating geometry will recreate visible gaps at Thread starts/ends.
-- Threads is conditionally mounted by workspace navigation. Its ResizeObserver must follow `activeWorkspace`, measure the newly mounted canvas immediately, and ignore zero-size stale measurements; otherwise Thread endpoints collapse to the left edge after returning from another workspace.
-- The approved grouping highlight baseline is an inset bar: 1px from top, 3px from sides, 1.5px thick. Full-border remains an enabled alternate style.
-- The configuration revision deliberately invalidates older incompatible browser-local visual payloads. Do not change the revision or storage keys casually.
-- Native dependency build approval is explicit and narrow in `pnpm-workspace.yaml`: esbuild, sharp, and workerd only. Do not replace it with broad dependency-script permission.
-- The long 32/32 soak remains manual; CI intentionally runs the deterministic model, render, browser, and accessibility gates.
-- The spatial coordinate definition in `spatial-routing.ts` is canonical. Do not create separate Sound Desk and Visualiser point lists or invert the documented Cartesian screen orientation.
-- Spatial assignments belong to channel records. `getChannelsAtCoordinate` intentionally returns an array; do not replace it with a single-value coordinate occupancy map, because future stacked routing may place multiple channels at one point.
-- Sound Desk availability is derived from Threads-owned terminal data. Do not add a manually synchronized rail-status list.
-- Sound Desk selection/proposal state is transient UI state; committed coordinate assignments remain in the spatial reducer.
-- When terminal completeness is lost, the shell removes any now-invalid spatial assignment. Unplot remains a Sound Desk-only operation and never mutates Threads.
-- Visualiser inspection is an observer of routing state, not an independent mutable copy.
+- `app/audio-runtime.ts`: shared application audio runtime, isolated channel graphs, Web Audio lifecycle, analyser access, state subscription and diagnostics.
+- `app/interaction-state.ts`: canonical Threads model, including active channel allocation, add/remove cleanup and restored-state sanitation.
+- `app/channel-routing.ts`: channel definitions, terminal/source records, derived availability and terminal validation.
+- `app/spatial-routing.ts`: canonical spatial coordinates and channel-owned optional routing assignments.
+- `app/workspace-navigation.ts`: ordered workspace destinations and adjacent transition helpers.
+- `app/page.tsx`: application shell, Threads UI, Inputs & Channels, CH 01 controls, Monitor/analyser canvas, Sound Desk and Visualiser.
+- `app/globals.css`: studio/window layout, scroll-contained dynamic channel list, audio controls, waveform and responsive behavior.
+- `app/ui-config.ts` / `app/ui-workshop.tsx`: approved visual configuration and development-only tuning boundary.
+- `tests/audio-runtime.test.mjs`: fake-Web-Audio lifecycle/ownership/error tests.
+- `tests/channel-routing.test.mjs`: dynamic identity, active-state allocation, terminal and removal tests.
+- `tests/interaction-state.test.mjs`, `tests/spatial-routing.test.mjs`, `tests/workspace-navigation.test.mjs`, `tests/ui-config.test.mjs`: retained model regression coverage.
+- `tests/rendered-html.test.mjs`: built-worker structural and accessible-control checks.
+- `e2e/ui-quality-gate.spec.ts`: real-browser UI, navigation, audio lifecycle, 24-channel scrolling/removal, numbering reset, accessibility and regression journeys.
+- `milestone_notes/milestone_06_threads_optimisation.txt`: Milestone 06 implementation record.
+- `milestone_notes/milestone_07_single_channel_audio.txt`: Milestone 07 ownership, verification and acceptance record.
 
-6. DO-NOT-BREAK CONTRACTS
+Primary audio data flow:
+1. UI reads a subscribed snapshot from `applicationAudioRuntime`.
+2. Explicit Start creates/resumes shared infrastructure if required, then creates one CH 01 source.
+3. Parameter controls update only CH 01 AudioParams with smoothing.
+4. The analyser provides real time-domain samples to Monitor while active.
+5. Stop removes the source and halts waveform rendering; shared infrastructure remains stable.
+6. Navigation remounts observers where appropriate but does not own or rebuild the audio engine.
 
-- Preserve the written RFE specification's application structure and behaviour, the approved separated studio/window identity, and the utility-led baseline. Do not collapse the product into a conventional DAW, synthesiser panel, or decorative integrated sci-fi dashboard without explicit authorisation.
-- Preserve reducer ownership and the current ModuleInstance, ThreadConnection, Selection, and AppState boundaries unless a future milestone explicitly changes the model.
-- Preserve unique module identity and independent parameter memory when adding, duplicating, saving, or restoring modules.
-- Preserve connection validation: enabled output to enabled input only; no self-connection; no duplicate source-target pair; no future-module routing.
-- Preserve cleanup invariants: no orphan Threads after delete, batch delete, clear, duplication, or restored-state sanitation.
-- Preserve the visual and functional distinction between selected modules, selected Threads, unavailable future modules, committed Threads, and pending draft connections.
-- Preserve Inspector collapse behaviour without discarding edited values.
-- Preserve workspace width limits and order: 100%, 150%, 200%; one control changes to retract at maximum and returns through 150% to baseline.
-- Preserve Thread attachment to actual port centres in Studio, Compact, zoomed, extended, and narrow responsive layouts. Keep the Playwright endpoint-distance assertions.
-- Preserve the approved grouping accent baseline and both supported highlight styles.
-- Keep the UI Workshop development-only and keep its preferences browser-local.
-- Keep the audio and particle engines absent until an explicitly scoped engine milestone.
-- Maintain the serious/critical axe gate and the focused browser journey; do not weaken assertions to hide regressions.
-- Maintain Node 22, pnpm lockfile usage, frozen CI install, and the explicit native build allowlist.
+5. FILES CHANGED IN THE APPROVED 06–07 BATCH
 
-7. KNOWN LIMITATIONS / DEFERRED WORK
+- `app/audio-runtime.ts` (new): isolated Web Audio runtime and diagnostics.
+- `app/channel-routing.ts`: one-channel/dynamic-channel routing model updates.
+- `app/interaction-state.ts`: dynamic channel lifecycle, cleanup, active-state numbering and restoration behavior.
+- `app/spatial-routing.ts`: dynamic channel synchronization and retained assignments.
+- `app/page.tsx`: optimised Threads test-bed, dynamic channel controls, CH 01 audio controls and real Monitor.
+- `app/globals.css`: revised Threads density/sidebar, scroll containment, audio controls and waveform.
+- `tests/audio-runtime.test.mjs` (new): audio ownership and lifecycle coverage.
+- `tests/channel-routing.test.mjs`: dynamic population, removal and numbering coverage.
+- `tests/rendered-html.test.mjs`, `tests/spatial-routing.test.mjs`: structural/regression updates.
+- `e2e/ui-quality-gate.spec.ts`: Milestone 06–07 browser acceptance and regression journeys.
+- `milestone_notes/milestone_06_threads_optimisation.txt` (new).
+- `milestone_notes/milestone_07_single_channel_audio.txt` (new).
+- `HANDOVER.txt`, `QUALITY_GATE.md`, `README.md`: repository truth advanced through Milestone 07.
 
-- All audio, scheduling, sample, and particle/field behaviour is mocked or absent.
-- Focus, product Favourites, Simulation Review, and deeper workflow logic are deferred.
-- Free window drag, resize, minimise, close, and expand are not implemented. Window chrome for these actions is disabled.
-- Audio In is a disabled future placeholder.
-- Navigation changes the active category/context label but does not yet render separate complete workspace implementations.
-- Persistence is browser-local only. There is no durable project database, migration contract for RFE data, cloud storage, collaboration, or account model.
-- Module creation uses the approved fixed MODULE_LIBRARY, basic central-offset placement, and UUID identity. There is no searchable module browser, custom module schema, collision-avoidance layout engine, marquee selection, or undo/redo history.
-- Workspace extension is horizontal only and capped at 200% of the visible baseline.
-- The 32/32 fixture tests UI workload and state integrity; it does not make engine-performance claims.
-- The complete approved milestone is not yet committed. Do not assume HEAD alone reproduces it.
+No application files were removed.
 
-8. VERIFICATION
+6. IMPORTANT IMPLEMENTATION DECISIONS
+
+- Application audio infrastructure and channel audio instances have separate ownership. Do not move AudioContext creation into a transient component.
+- Do not close/reset shared audio resources during channel Stop, parameter changes, channel disposal or UI remount.
+- Future audible channels must receive independent source/gain/analyser ownership and connect into the existing shared master.
+- Audio is local/browser-native. No remote processing, cloud audio service or server-side audio dependency exists.
+- Conservative gain staging is intentional: channel maximum 0.2, shared master 0.8 and default level 20%.
+- There is no limiter/mastering chain. Start manual listening at conservative device volume.
+- Workspace navigation intentionally permits CH 01 to continue. Changing this policy requires an explicit product decision and lifecycle tests.
+- Spatial routing and audio generation remain separate. Coordinates are retained data but do not pan or process sound.
+- Dynamic channel numbering is based on active channel state, not a permanent lifetime counter. Gaps below the current maximum are not reused while channels remain.
+- Channel list scrolling is internal to Inputs & Channels. Do not allow flex/grid shrink to clip fixture content or controls.
+- AppState remains the source of truth for application interaction. Audio runtime state is engine state and must not be duplicated into reducer/UI state.
+- Visual configuration remains separate from both AppState and audio-engine state.
+- Existing cleanup invariants, stable identity, spatial ownership and navigation contracts remain in force.
+
+7. DO-NOT-BREAK CONTRACTS
+
+- One active channel source must never recreate or replace shared output.
+- Stop must silence/dispose the channel source; Restart must return exactly one source.
+- Channel disposal must remain scoped and must never close the application AudioContext.
+- Frequency/level updates must target the current source/channel graph without parallel oscillator creation.
+- Monitor must reflect actual active state, frequency and level; the waveform must use analyser data rather than decorative animation.
+- No autoplay. Audio initialization/resume must follow an explicit user gesture.
+- Preserve accessible Start/Stop, frequency slider, exact frequency buttons, level control and text state.
+- Preserve active-state channel numbering: empty -> 01; otherwise max(active)+1; never duplicate an active ID.
+- Preserve full-height, independently scrollable dynamic channel rows and reachable remove controls at large populations.
+- Removing a channel must remove only its own terminal/spatial/audio resources and retain peers.
+- Preserve reducer ownership, module/Thread distinction, connection validation and orphan cleanup.
+- Preserve canonical spatial coordinates and Sound Desk/Visualiser shared routing truth.
+- Do not add multi-channel audio, panning, spatial audio, distribution, effects, recording, file playback or simulation without an explicit milestone brief.
+- Maintain TypeScript, ESLint, production build, model/browser regression and axe gates.
+
+8. KNOWN LIMITATIONS / DEFERRED WORK
+
+- Only CH 01 is audible. Additional dynamic channels are routing/test-bed structures only.
+- Audible behavior depends on browser/device output. Automated tests prove lifecycle and analyser behavior, not human-perceived sound quality.
+- Short ramps reduce likely clicks but device-specific clicks/pops remain a listening concern for future work.
+- No stereo panning, X/Y audio mapping, HRTF, binaural/surround processing or distribution engine.
+- No live input, recording, sample/file playback, loops, effects, EQ, compression or mastering protection.
+- No particle/field simulation or audio/visual gating.
+- Persistence remains browser-local; there is no durable project database/collaboration contract.
+- Free window management, product Focus/Favourites and deeper workflows remain deferred.
+- Audio diagnostics are exposed for engineering validation but are intentionally not a full user-facing telemetry panel.
+
+9. VERIFICATION
 
 Run from the repository root with Node.js 22.13+ and pnpm 11.16.0:
 
 1. `pnpm run typecheck`
-   Expected: TypeScript exits successfully with no diagnostics.
+   Expected: no TypeScript diagnostics.
 
 2. `pnpm run lint`
-   Expected: ESLint exits successfully with no errors.
+   Expected: no ESLint errors.
 
-3. `pnpm test`
-   Expected: production build succeeds and 28 Node tests pass with zero failures.
+3. `pnpm run build`
+   Expected: vinext production build succeeds.
 
-4. `pnpm run test:e2e`
-   Expected: production build succeeds and 6 Playwright tests pass. Coverage includes Compact Thread endpoint alignment, workspace navigation/state retention, shared session timing, spatial reassignment/unassignment, Visualiser synchronization, responsive square-grid geometry, reduced motion, and axe.
+4. `node --experimental-strip-types --test tests/*.test.mjs`
+   Expected at handover: 34/34 Node tests pass.
 
-5. `pnpm run test:stress-ui`
-   Expected: the script validates a 32-module/32-Thread fixture and prints the manual soak procedure.
+5. `pnpm exec playwright test`
+   Expected at handover: 10/10 Playwright tests pass, including axe.
 
-6. Optional consolidated compile gate: `pnpm run check`
-   Expected: typecheck, lint, and production build all succeed.
+6. `pnpm run test:stress-ui`
+   Expected: fixture validation and manual soak instructions.
 
-Manual confidence check:
-- Run `pnpm dev` and open `http://localhost:3000`.
-- Select and independently edit two modules; values must persist when switching selection.
-- Shift-click two modules, drag the batch, duplicate it, then delete it; relative movement and Thread cleanup must remain coherent.
-- Add and rename a module; delete it; clear the workspace with confirmation.
-- Collapse and reopen Inspector sections; values must remain unchanged.
-- Create and delete a valid Thread; invalid/future/duplicate targets must reject cleanly.
-- Switch Studio <-> Compact and confirm every Thread visibly meets its port.
-- Cycle Extend +50% to 200%, then Retract -50% through 150% to 100%.
-- Navigate Threads -> Sound Desk -> Visualiser and back. Confirm direction, boundary controls and preserved Threads edits.
-- At a compact/touch viewport, confirm the bottom-right previous/next fallback replaces edge affordances.
-- In Sound Desk confirm CH 01 (0,0), CH 02 (-2,-1), and CH 03 (1,2). Reassign CH 02 to (2,-2), unassign CH 03, then reveal the Visualiser routing inspection and confirm the same state.
-
-Latest completed verification before this handover:
+Latest completed verification before repository reconciliation:
 - Typecheck: PASS
-- Lint: PASS
+- ESLint: PASS
 - Production build: PASS
-- Node state/render/configuration tests: PASS, 28/28
-- Playwright interaction/navigation/routing journey: PASS, 6/6
+- Node tests: PASS, 34/34
+- Playwright/browser tests: PASS, 10/10
 - axe serious/critical scan: PASS
-- Git source-diff validation: PASS on the reconciled review branch.
+- User audible/interaction acceptance: PASS
+- Git diff integrity: PASS
 
-9. ENVIRONMENT / DEPENDENCIES
+Manual audio confidence check:
+- Begin with conservative headphone/speaker volume.
+- Confirm initial SILENT / NO SIGNAL state.
+- Start CH 01 and confirm one clean tone plus real waveform.
+- Sweep the slider and use minus/plus for exact 1 Hz changes.
+- Change level conservatively and confirm predictable output.
+- Stop/restart repeatedly and confirm no duplicate tone or residual audio.
+- Navigate Threads -> Sound Desk -> Visualiser -> Threads while active and confirm one coherent continuing source.
+- Add many channels, scroll the channel list, remove arbitrary channels, then remove all; confirm the next channel is CH 01.
+
+10. ENVIRONMENT / DEPENDENCIES
 
 - Runtime: Node.js >=22.13.0.
-- Package manager: pnpm 11.16.0, locked by `pnpm-lock.yaml` and `packageManager` in package.json.
-- UI/runtime: React 19.2.6, React DOM 19.2.6, vinext 1.0.0-beta.2, Vite 8.0.13, Cloudflare Vite plugin 1.37.1, Wrangler 4.92.0.
+- Package manager: pnpm 11.16.0, locked by `pnpm-lock.yaml` and `packageManager`.
+- UI/runtime: React 19.2.6, React DOM 19.2.6, vinext 1.0.0-beta.2, Vite 8.0.13.
 - Language/tooling: TypeScript 5.9.3, ESLint 9.39.4.
-- Browser QA: Playwright >=1.62.1 and @axe-core/playwright >=4.12.1; Chromium must be installed for browser checks.
-- Build output is Cloudflare Worker-compatible ESM through the existing vinext/Vite configuration.
-- Native package build scripts are allowed only for esbuild, sharp, and workerd in `pnpm-workspace.yaml`.
-- No secrets or external services are required for the approved UI milestone.
-- Development: `pnpm dev`, normally served at `http://localhost:3000`.
-- Production preview: `pnpm build`, then `pnpm start`.
+- Browser QA: Playwright and @axe-core/playwright; Chromium required.
+- Audio: browser-native Web Audio API; no new audio package or service dependency.
+- Build: Cloudflare Worker-compatible ESM through the existing vinext/Vite configuration.
+- Native build allowlist remains esbuild, sharp and workerd only.
+- No secrets or external services are required.
+- Development: `pnpm dev`, normally `http://localhost:3000`.
+- Production preview: `pnpm build`, then `pnpm start` (quality gate uses port 3002).
 
-10. NEXT INTENDED MILESTONE
+11. NEXT INTENDED BATCH
 
-Milestone 06 scope is not yet authorised. It is expected to make the existing routed-channel rows audible through a minimal sine-wave test source and compact per-channel level controls. Retain stable channel identity, derived routability and the current Plotter row boundary. Do not infer permission to implement advanced mixing, automated distribution, synthesis tools, simulation, particle/field interaction, Focus, or persistence.
+Milestones 08–09 require a fresh explicit brief. Their scope is not authorised by this handover. Likely future work may build on the isolated channel-instance model, but do not assume that this means immediately enabling multiple audible channels, spatial mapping, distribution, simulation or any other deferred feature.
 
-11. INSTRUCTIONS FOR THE NEXT CODING AGENT
+Before beginning Milestone 08:
+- Read this handover and both Milestone 06/07 notes completely.
+- Inspect the repository/current branch and confirm a clean approved Milestone 07 baseline.
+- Run baseline verification appropriate to the new brief.
+- Preserve the application/channel audio ownership split.
+- Treat the Milestone 08–09 brief as the sole source of new implementation authority.
+
+12. INSTRUCTIONS FOR THE NEXT CODING AGENT
 
 A new coding agent must:
-- Read this handover before modifying the repository.
-- Inspect the repository itself rather than assuming this document is perfectly current.
-- Preserve the approved baseline.
-- Run appropriate verification before making changes.
-- Work only within the scope of the explicitly assigned milestone/task.
-- Prefer minimal, targeted changes over unnecessary refactoring.
-- Never reinterpret planned functionality as permission to implement it.
-- Report unexpected repository state, architectural conflicts, or failing baseline tests before attempting broad repairs.
-- Check the working tree and current branch before editing; preserve the reviewed Milestone 05 baseline.
-- Treat the milestone notes and this handover as the current implementation boundary.
-
-12. EXTERNAL / SECONDARY AGENT PROTOCOL
-
-If this repository copy is being used by a secondary coding model for an isolated task:
-- Treat the existing architecture as read-only unless the task explicitly requires a local modification.
-- Make the smallest change necessary.
-- Do not redesign application architecture.
-- Do not perform opportunistic refactors.
-- Do not rename or reorganise unrelated code.
-- Do not alter established interfaces unnecessarily.
-- Record every file changed and explain why each change was required.
-- Run available verification.
-- Report uncertainty rather than guessing.
-- Treat secondary-agent output as a candidate patch, not automatically as the new project baseline.
-- Require review and verification before integrating a candidate patch into the primary repository.
+- Read `HANDOVER.txt`, `milestone_notes/milestone_06_threads_optimisation.txt` and `milestone_notes/milestone_07_single_channel_audio.txt` before editing.
+- Inspect repository state rather than assuming this handover is perfectly current.
+- Work only within the explicitly supplied Milestone 08–09 scope.
+- Preserve approved interaction, routing, audio isolation and cleanup contracts.
+- Prefer minimal targeted changes over broad refactoring.
+- Run verification in proportion to risk and report baseline failures before attempting broad repairs.
+- Never claim automated browser tests prove human audible quality.
+- Stop at the next milestone's explicit acceptance boundary and wait for user approval before repository reconciliation.
 
 13. BASELINE FINGERPRINT
 
-Milestone: 05 — Threads → Sound Desk Channel Routing + Grid Plotter
-Status: COMPLETE — user-approved baseline; end-of-day verification complete
-Repository state: Milestones 03–05 reconciled onto review branch `agent/milestones-03-05`, based on `milestone/ui-interaction-harness` at 069c7d5.
-Test status: PASS — typecheck, lint, 28/28 Node tests, 6/6 Playwright tests including terminal routing, Plotter workflow, spatial synchronization, shared-timer continuity and axe
-Build status: PASS — vinext production build completed successfully
+Milestone: 07 — Single-Channel Audible Signal Test (combined approved Milestones 06–07 batch)
+Status: COMPLETE — user-approved
+Previous approved commit: `29304875827e4cdc006765c898186ae0004853fa` (Milestone 05)
+Repository branch: `agent/milestones-03-05` after local fast-forward reconciliation
+Verification: PASS — typecheck, lint, build, 34/34 Node tests, 10/10 Playwright tests, axe, user acceptance
+Audio model: one shared application runtime/master plus isolated CH 01 source/gain/analyser instance
+Next work: Milestones 08–09 only after a new explicit brief and fresh context
 Handover updated: 2026-08-12 (Europe/London)

@@ -1,6 +1,6 @@
-# RFE UI quality gate
+# RFE Milestone 07 quality gate
 
-The milestone is prepared on `milestone/ui-interaction-harness`.
+The approved Milestones 06–07 batch is reconciled through the repository review branch documented in `HANDOVER.txt`.
 
 ## Run locally
 
@@ -17,4 +17,4 @@ Open the repository on GitHub, choose **Actions**, then open **UI Quality Gate**
 
 Run `pnpm run test:stress-ui`, launch the app, choose **RFE_32x32_Benchmark** under **Preset**, and start the test session. For 10–15 minutes, move and select modules, edit controls, and inspect Threads. Confirm the timer advances normally, Diagnostics remain coherent at 32 modules / 32 Threads, controls remain responsive, Thread geometry follows movement, and no blank screen, lock-up, stale selection or visible error appears.
 
-The browser gate also verifies directional navigation across Threads, Sound Desk and Visualiser, state retention when returning to Threads, the shared session timer, explicit channel output terminals, five complete Thread channels, complete/incomplete/unused Channel Rail states, the canonical 5 × 5 Plotter workflow, reassignment/unplot, Visualiser inspection synchronization, compact touch controls, reduced motion, and accessibility labels. Focus, free window management, audio generation, mixing, distribution behavior and particle/simulation behavior remain outside the current milestone.
+The browser gate verifies directional navigation across Threads, Sound Desk and Visualiser, state retention, the shared session timer, dynamic channel terminals, a 24-channel scroll/removal case, empty-state channel-number reset, the canonical 5 × 5 Plotter workflow, Visualiser synchronization, CH 01 Web Audio lifecycle isolation, precise frequency controls, real Monitor state, reduced motion, and accessibility labels. Multi-channel audible output, spatial audio, mixing/distribution behavior and particle/simulation behavior remain outside the approved milestone.

@@ -1,6 +1,7 @@
 import type { AccentId } from "./ui-config";
 import {
   canConnectChannelTerminal,
+  createChannelDefinition,
   type ChannelId,
   type ChannelTerminalConnection,
   type ThreadChannel,
@@ -9,7 +10,7 @@ import {
 export type ModuleKind = "source" | "control" | "routing" | "future";
 export type ModuleStatus = "active" | "muted" | "bypassed";
 export type ModuleMode = "mono" | "poly" | "arp";
-export type Selection = { kind: "module"; id: string; ids?: string[] } | { kind: "connection"; id: string } | null;
+export type Selection = { kind: "module"; id: string; ids?: string[] } | { kind: "connection"; id: string } | { kind: "channel"; id: ChannelId } | null;
 export type CanvasTool = "select" | "pan";
 export type WorkspaceWidth = 100 | 150 | 200;
 export type ModuleTemplateType = "note-buttons" | "chord-trigger" | "custom-note" | "note-length" | "attack" | "release" | "seed-injection" | "sample-slots" | "particle-mapping";
@@ -61,6 +62,7 @@ export type AppState = {
   connections: ThreadConnection[];
   threadChannels: ThreadChannel[];
   channelTerminalConnections: ChannelTerminalConnection[];
+  nextChannelSequence: number;
   selection: Selection;
   pendingConnectionFrom: string | null;
   activeNav: string;
@@ -93,6 +95,9 @@ export type AppAction =
   | { type: "commit-connection"; toModuleId: string }
   | { type: "commit-channel-output"; channelId: ChannelId }
   | { type: "remove-channel-output"; channelId: ChannelId }
+  | { type: "add-channel" }
+  | { type: "remove-channel"; channelId: ChannelId }
+  | { type: "select-channel"; channelId: ChannelId }
   | { type: "cancel-connection" }
   | { type: "remove-connection"; id: string }
   | { type: "delete-selection" }
@@ -171,18 +176,18 @@ export function createInitialState(): AppState {
     fromPort: "out" as const,
     toPort: "in" as const,
   }));
-  const threadChannels: ThreadChannel[] = ["01", "02", "03", "04", "05"].map((number) => ({ channelId: `channel-${number}` as ChannelId }));
-  const terminalSources = ["chord", "attack", "release", "mapping", "slots"];
-  const channelTerminalConnections: ChannelTerminalConnection[] = threadChannels.map((channel, index) => ({
-    id: `channel-output-${index + 1}`,
-    channelId: channel.channelId,
-    fromModuleId: terminalSources[index],
-  }));
+  const threadChannels: ThreadChannel[] = [createChannelDefinition(1)];
+  const channelTerminalConnections: ChannelTerminalConnection[] = [{
+    id: "channel-output-1",
+    channelId: threadChannels[0].id,
+    fromModuleId: "chord",
+  }];
   return {
     modules,
     connections,
     threadChannels,
     channelTerminalConnections,
+    nextChannelSequence: 2,
     selection: { kind: "module", id: "length" },
     pendingConnectionFrom: null,
     activeNav: "Modules",
@@ -198,6 +203,14 @@ export function createInitialState(): AppState {
     session: { running: false, startedAt: null, accumulatedMs: 0 },
     updateCount: 0,
   };
+}
+
+function getNextChannelSequence(channels: readonly ThreadChannel[]): number {
+  if (!channels.length) return 1;
+  const activeSequences = channels
+    .map((channel) => Number.parseInt(channel.id.replace("channel-", ""), 10))
+    .filter((sequence) => Number.isFinite(sequence) && sequence > 0);
+  return activeSequences.length ? Math.max(...activeSequences) + 1 : 1;
 }
 
 export function createBenchmarkState(moduleCount = 32, threadCount = 32): AppState {
@@ -226,6 +239,7 @@ export function createBenchmarkState(moduleCount = 32, threadCount = 32): AppSta
     connections,
     threadChannels: [],
     channelTerminalConnections: [],
+    nextChannelSequence: 1,
     selection: modules[0] ? { kind: "module", id: modules[0].id } : null,
     presetName: "RFE_32x32_Benchmark",
     statusMessage: `${modules.length} modules / ${connections.length} Threads loaded`,
@@ -296,6 +310,10 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       return withUpdate(state, { selection: moduleSelection(ids), pendingConnectionFrom: null, statusMessage: ids.length ? `${ids.length} module${ids.length === 1 ? "" : "s"} selected` : "Selection cleared" });
     }
     case "select-connection": return state.connections.some((item) => item.id === action.id) ? withUpdate(state, { selection: { kind: "connection", id: action.id }, pendingConnectionFrom: null, statusMessage: `${action.id} selected` }) : state;
+    case "select-channel": {
+      const channel = state.threadChannels.find((item) => item.id === action.channelId);
+      return channel ? withUpdate(state, { selection: { kind: "channel", id: channel.id }, pendingConnectionFrom: null, statusMessage: `${channel.label} selected` }) : state;
+    }
     case "move-module": {
       const anchor = state.modules.find((module) => module.id === action.id);
       if (!anchor) return state;
@@ -344,7 +362,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       const duplicateIds = duplicates.map((module) => module.id);
       return withUpdate(state, { modules: [...state.modules, ...duplicates], connections: [...state.connections, ...duplicateConnections], selection: moduleSelection(duplicateIds), pendingConnectionFrom: null, statusMessage: `${duplicates.length} module${duplicates.length === 1 ? "" : "s"} duplicated` });
     }
-    case "clear-workspace": return withUpdate(state, { modules: [], connections: [], threadChannels: [], channelTerminalConnections: [], selection: null, pendingConnectionFrom: null, pan: { x: 0, y: 0 }, statusMessage: "Workspace cleared" });
+    case "clear-workspace": return withUpdate(state, { modules: [], connections: [], threadChannels: [], channelTerminalConnections: [], nextChannelSequence: 1, selection: null, pendingConnectionFrom: null, pan: { x: 0, y: 0 }, statusMessage: "Workspace cleared" });
     case "update-parameter": return withUpdate(state, { modules: state.modules.map((module) => module.id === action.id && module.enabled ? { ...module, parameters: { ...module.parameters, [action.key]: action.value } } : module), statusMessage: `${String(action.key)} updated` });
     case "reset-module": return withUpdate(state, { modules: state.modules.map((module) => module.id === action.id ? { ...module, parameters: { ...DEFAULT_PARAMETERS } } : module), statusMessage: "Module parameters reset" });
     case "set-accent": return withUpdate(state, { modules: state.modules.map((module) => module.id === action.id ? { ...module, accentId: action.accentId } : module) });
@@ -369,6 +387,30 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     case "remove-channel-output": {
       if (!state.channelTerminalConnections.some((connection) => connection.channelId === action.channelId)) return state;
       return withUpdate(state, { channelTerminalConnections: state.channelTerminalConnections.filter((connection) => connection.channelId !== action.channelId), pendingConnectionFrom: null, statusMessage: `${action.channelId.replace("channel-", "CH ")} output incomplete` });
+    }
+    case "add-channel": {
+      const sequence = getNextChannelSequence(state.threadChannels);
+      const channel = createChannelDefinition(sequence);
+      return withUpdate(state, {
+        threadChannels: [...state.threadChannels, channel],
+        nextChannelSequence: sequence + 1,
+        selection: { kind: "channel", id: channel.id },
+        pendingConnectionFrom: null,
+        statusMessage: `${channel.label} added`,
+      });
+    }
+    case "remove-channel": {
+      const channel = state.threadChannels.find((item) => item.id === action.channelId);
+      if (!channel) return state;
+      const threadChannels = state.threadChannels.filter((item) => item.id !== action.channelId);
+      return withUpdate(state, {
+        threadChannels,
+        channelTerminalConnections: state.channelTerminalConnections.filter((connection) => connection.channelId !== action.channelId),
+        nextChannelSequence: getNextChannelSequence(threadChannels),
+        selection: state.selection?.kind === "channel" && state.selection.id === action.channelId ? null : state.selection,
+        pendingConnectionFrom: null,
+        statusMessage: `${channel.label} removed`,
+      });
     }
     case "cancel-connection": return state.pendingConnectionFrom ? withUpdate(state, { pendingConnectionFrom: null, statusMessage: "Connection cancelled" }) : state;
     case "remove-connection": return state.connections.some((connection) => connection.id === action.id) ? withUpdate(state, { connections: state.connections.filter((connection) => connection.id !== action.id), selection: null, statusMessage: "Thread disconnected" }) : state;
@@ -419,16 +461,24 @@ export function sanitizeRestoredState(value: unknown): AppState | null {
   const connections = candidate.connections.filter((connection) => ids.has(connection.fromModuleId) && ids.has(connection.toModuleId));
   const defaultState = createInitialState();
   const threadChannels = Array.isArray(candidate.threadChannels)
-    ? candidate.threadChannels.filter((channel, index, channels) => typeof channel?.channelId === "string" && channels.findIndex((item) => item?.channelId === channel.channelId) === index)
+    ? candidate.threadChannels.flatMap((channel, index, channels) => {
+      const legacyId = (channel as ThreadChannel & { channelId?: ChannelId })?.channelId;
+      const id = typeof channel?.id === "string" ? channel.id : legacyId;
+      if (typeof id !== "string" || channels.findIndex((item) => (item as ThreadChannel & { channelId?: ChannelId })?.id === id || (item as ThreadChannel & { channelId?: ChannelId })?.channelId === id) !== index) return [];
+      const sequence = Number.parseInt(id.replace("channel-", ""), 10);
+      return [typeof channel.label === "string" && typeof channel.shortLabel === "string" && typeof channel.accentId === "string" ? channel : createChannelDefinition(Number.isFinite(sequence) ? sequence : index + 1)];
+    })
     : defaultState.threadChannels;
-  const channelIds = new Set(threadChannels.map((channel) => channel.channelId));
+  const channelIds = new Set(threadChannels.map((channel) => channel.id));
   const channelTerminalConnections = Array.isArray(candidate.channelTerminalConnections)
     ? candidate.channelTerminalConnections.filter((connection, index, items) => ids.has(connection.fromModuleId) && channelIds.has(connection.channelId) && items.findIndex((item) => item?.channelId === connection.channelId) === index)
     : defaultState.channelTerminalConnections.filter((connection) => ids.has(connection.fromModuleId));
   const selectedIds = getSelectedModuleIds(candidate.selection ?? null).filter((id) => ids.has(id));
   const selection = candidate.selection?.kind === "connection"
     ? connections.some((connection) => connection.id === candidate.selection?.id) ? candidate.selection : null
-    : moduleSelection(selectedIds);
+    : candidate.selection?.kind === "channel"
+      ? channelIds.has(candidate.selection.id) ? candidate.selection : null
+      : moduleSelection(selectedIds);
   return {
     ...defaultState,
     ...candidate,
@@ -436,6 +486,7 @@ export function sanitizeRestoredState(value: unknown): AppState | null {
     connections,
     threadChannels,
     channelTerminalConnections,
+    nextChannelSequence: getNextChannelSequence(threadChannels),
     selection,
     pendingConnectionFrom: null,
     session: { running: false, startedAt: null, accumulatedMs: 0 },

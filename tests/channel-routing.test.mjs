@@ -4,55 +4,78 @@ import { getIncomingChannels, isChannelRoutable } from "../app/channel-routing.t
 import { appReducer, createInitialState } from "../app/interaction-state.ts";
 import { createInitialSpatialRoutingState, getCoordinateByKey, spatialRoutingReducer } from "../app/spatial-routing.ts";
 
-test("five stable Thread outputs arrive as routable channels with additional unused capacity", () => {
+test("default Threads state contains one active, routable channel", () => {
   const state = createInitialState();
-  const incoming = getIncomingChannels(state);
-  assert.deepEqual(incoming.map((channel) => [channel.id, channel.status]), [
-    ["channel-01", "complete"],
-    ["channel-02", "complete"],
-    ["channel-03", "complete"],
-    ["channel-04", "complete"],
-    ["channel-05", "complete"],
-    ["channel-06", "unused"],
-  ]);
-  assert.equal(new Set(state.channelTerminalConnections.map((connection) => connection.channelId)).size, 5);
+  assert.deepEqual(getIncomingChannels(state).map((channel) => [channel.id, channel.status]), [["channel-01", "complete"]]);
+  assert.equal(state.threadChannels.length, 1);
+  assert.equal(state.channelTerminalConnections.length, 1);
+});
+
+test("dynamic channels follow the highest active identity with no five-channel ceiling", () => {
+  let state = createInitialState();
+  for (let index = 0; index < 7; index += 1) state = appReducer(state, { type: "add-channel" });
+  assert.equal(state.threadChannels.length, 8);
+  assert.deepEqual(state.threadChannels.map((channel) => channel.id), ["channel-01", "channel-02", "channel-03", "channel-04", "channel-05", "channel-06", "channel-07", "channel-08"]);
+  state = appReducer(state, { type: "remove-channel", channelId: "channel-03" });
+  state = appReducer(state, { type: "add-channel" });
+  assert.deepEqual(state.threadChannels.map((channel) => channel.id), ["channel-01", "channel-02", "channel-04", "channel-05", "channel-06", "channel-07", "channel-08", "channel-09"]);
+});
+
+test("channel numbering resets only when no active channels remain", () => {
+  let state = createInitialState();
+  for (let index = 0; index < 8; index += 1) state = appReducer(state, { type: "add-channel" });
+  for (const channelId of ["channel-02", "channel-03", "channel-04", "channel-06", "channel-07", "channel-08"]) {
+    state = appReducer(state, { type: "remove-channel", channelId });
+  }
+  assert.deepEqual(state.threadChannels.map((channel) => channel.id), ["channel-01", "channel-05", "channel-09"]);
+  state = appReducer(state, { type: "add-channel" });
+  assert.deepEqual(state.threadChannels.map((channel) => channel.id), ["channel-01", "channel-05", "channel-09", "channel-10"]);
+
+  for (const channel of [...state.threadChannels]) state = appReducer(state, { type: "remove-channel", channelId: channel.id });
+  assert.equal(state.threadChannels.length, 0);
+  assert.equal(state.nextChannelSequence, 1);
+  state = appReducer(state, { type: "add-channel" });
+  assert.deepEqual(state.threadChannels.map((channel) => channel.id), ["channel-01"]);
 });
 
 test("terminal connectivity derives incomplete state and gates plotting eligibility", () => {
-  const initial = createInitialState();
-  const incomplete = appReducer(initial, { type: "remove-channel-output", channelId: "channel-04" });
-  assert.equal(getIncomingChannels(incomplete).find((channel) => channel.id === "channel-04").status, "incomplete");
-  assert.equal(isChannelRoutable(incomplete, "channel-04"), false);
-  assert.equal(getIncomingChannels(incomplete).find((channel) => channel.id === "channel-06").status, "unused");
-  assert.equal(incomplete.threadChannels.some((channel) => channel.channelId === "channel-04"), true);
+  let state = appReducer(createInitialState(), { type: "add-channel" });
+  assert.equal(getIncomingChannels(state).find((channel) => channel.id === "channel-02").status, "incomplete");
+  assert.equal(isChannelRoutable(state, "channel-02"), false);
+  state = appReducer(state, { type: "begin-connection", fromModuleId: "attack" });
+  state = appReducer(state, { type: "commit-channel-output", channelId: "channel-02" });
+  assert.equal(isChannelRoutable(state, "channel-02"), true);
 });
 
-test("an incomplete channel becomes routable only through an actual terminal connection", () => {
-  let state = appReducer(createInitialState(), { type: "remove-channel-output", channelId: "channel-04" });
-  state = appReducer(state, { type: "begin-connection", fromModuleId: "chord" });
-  state = appReducer(state, { type: "commit-channel-output", channelId: "channel-04" });
-  assert.equal(isChannelRoutable(state, "channel-04"), true);
-  assert.equal(state.channelTerminalConnections.filter((connection) => connection.channelId === "channel-04").length, 1);
+test("removing one channel preserves peers and removes only its terminal and downstream route", () => {
+  let threads = createInitialState();
+  threads = appReducer(threads, { type: "add-channel" });
+  threads = appReducer(threads, { type: "begin-connection", fromModuleId: "attack" });
+  threads = appReducer(threads, { type: "commit-channel-output", channelId: "channel-02" });
+  threads = appReducer(threads, { type: "add-channel" });
+
+  let routing = createInitialSpatialRoutingState(threads.threadChannels);
+  const destination = getCoordinateByKey("2,1");
+  assert.ok(destination);
+  routing = spatialRoutingReducer(routing, { type: "assign-channel", channelId: "channel-02", coordinate: destination });
+
+  const remainingIds = threads.threadChannels.filter((channel) => channel.id !== "channel-02").map((channel) => channel.id);
+  threads = appReducer(threads, { type: "remove-channel", channelId: "channel-02" });
+  routing = spatialRoutingReducer(routing, { type: "sync-channels", channels: threads.threadChannels });
+
+  assert.deepEqual(threads.threadChannels.map((channel) => channel.id), remainingIds);
+  assert.equal(threads.channelTerminalConnections.some((connection) => connection.channelId === "channel-02"), false);
+  assert.equal(routing.channels.some((channel) => channel.id === "channel-02"), false);
+  assert.equal(routing.channels.find((channel) => channel.id === "channel-01").assignment && true, true);
 });
 
-test("deleting a terminal source makes its stable channel incomplete without affecting peers", () => {
+test("deleting a terminal source makes only its stable channel incomplete", () => {
   let state = createInitialState();
+  state = appReducer(state, { type: "add-channel" });
+  state = appReducer(state, { type: "begin-connection", fromModuleId: "attack" });
+  state = appReducer(state, { type: "commit-channel-output", channelId: "channel-02" });
   state = appReducer(state, { type: "select-module", id: "chord" });
   state = appReducer(state, { type: "delete-selection" });
   assert.equal(getIncomingChannels(state).find((channel) => channel.id === "channel-01").status, "incomplete");
   assert.equal(getIncomingChannels(state).find((channel) => channel.id === "channel-02").status, "complete");
-  assert.equal(state.threadChannels.some((channel) => channel.channelId === "channel-01"), true);
-});
-
-test("unplotting changes only Sound Desk routing and preserves the Thread source", () => {
-  const threads = createInitialState();
-  const initialRouting = createInitialSpatialRoutingState();
-  const unplotted = spatialRoutingReducer(initialRouting, { type: "unassign-channel", channelId: "channel-05" });
-  assert.equal(unplotted.channels.find((channel) => channel.id === "channel-05").assignment, null);
-  assert.equal(isChannelRoutable(threads, "channel-05"), true);
-  assert.equal(threads.channelTerminalConnections.some((connection) => connection.channelId === "channel-05"), true);
-  const destination = getCoordinateByKey("2,1");
-  assert.ok(destination);
-  const replotted = spatialRoutingReducer(unplotted, { type: "assign-channel", channelId: "channel-05", coordinate: destination });
-  assert.deepEqual(replotted.channels.find((channel) => channel.id === "channel-05").assignment, destination);
 });
