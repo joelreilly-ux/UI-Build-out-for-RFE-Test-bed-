@@ -1,0 +1,145 @@
+RFE PROTOTYPE TEST-BED — MILESTONE 09 REVIEW COPY
+
+Snapshot date: 2026-08-12 (Europe/London)
+Workspace: /Users/requiredrequired/Documents/ChatGPT/Test Engine. Milestones 03-06
+Branch: agent/milestones-03-05
+Pre-promotion HEAD: 2bc63fc
+Purpose: human-readable review snapshot; HANDOVER.txt remains the canonical handover.
+
+1. WHERE THE PROJECT IS NOW
+
+- Approved repository baseline: Milestone 09.
+- Milestone 08: implemented, automatically verified, and user-approved.
+- Milestone 09: implemented, automatically verified, and explicitly user-approved.
+- Milestone 10: not started.
+- Combined Milestones 08–09 were authorized for commit and promotion as the new repository baseline on 2026-08-12.
+
+2. CURRENT APPLICATION MODEL
+
+The application has three ordered workspaces:
+
+THREADS -> SOUND DESK -> VISUALISER
+
+Threads owns channel creation, sine-source programming, construction nodes, Channel Out wiring, and the contextual Monitor.
+
+Sound Desk owns routability display, canonical X/Y placement, X-axis stereo panning, and per-channel relative Live Trim.
+
+Visualiser retains routing inspection. Threads, Sound Desk, and Visualiser now share the same Play/Pause/Stop session transport and elapsed timer.
+
+3. SOURCE PLACEMENT AND ROUTING
+
+- Each unplaced sine player exposes PLACE SOURCE.
+- Placement creates exactly one stable channel-bound, output-only source node in Threads.
+- A placed source can connect only to its matching Channel Out.
+- Placing transfers the full player out of Inputs & Channels, keeping the sidebar uncluttered.
+- Selecting the placed node exposes frequency, level, and Start/Stop in Inspector.
+- Removing the node returns the player to Inputs & Channels.
+- Removing a channel cleans only that channel's source, wire, route, and audio branch.
+- Duplicate channel-bound source placement is rejected.
+
+4. AUDIO OWNERSHIP AND ISOLATION
+
+One application AudioContext owns one shared session gate and one shared master.
+
+Every stable channel owns an independent:
+
+- sine oscillator and source envelope;
+- programmed gain;
+- relative Live Trim gain;
+- analyser;
+- stereo panner;
+- frequency, level, trim, pan, routability, and active state;
+- scoped disposal lifecycle.
+
+Graph:
+
+SOURCE -> ENVELOPE -> PROGRAMMED GAIN -> LIVE TRIM -> ANALYSER -> STEREO PANNER -> SESSION GATE -> MASTER -> DEVICE
+
+Channel edits, starts, stops, disconnections, deletion, and recreation do not rebuild or disturb peer channels.
+
+5. CHANNEL OUT DISCONNECTION
+
+Disconnecting a sounding source from Channel Out now smoothly silences only that channel through its existing Live Trim stage.
+
+The oscillator is preserved, the programmed level and trim are unchanged, peer channels are unaffected, and reconnecting restores the previous relative trim without source reconstruction.
+
+6. SOUND DESK SPATIAL AND LIVE CONTROL
+
+- Canonical X positions -2, -1, 0, 1, 2 map linearly to stereo pan -1, -0.5, 0, 0.5, 1.
+- Y remains intentionally acoustically neutral.
+- Live Trim is relative to the programmed Threads level and is bounded from -100% to +16%.
+- -100% is mute; resetting to 0 restores the exact programmed level.
+- Parameter changes use short smoothing ramps.
+
+7. MONITOR AND COMPOSITE OSCILLOSCOPE
+
+Monitor text remains contextual to the focused channel while the oscilloscope renders one combined trace of every currently sounding, routed channel.
+
+The composite makes phase interaction, reinforcement, cancellation, and beating visible in one view. Unrouted, muted, paused, and stopped channels are excluded because they are not audible.
+
+The waveform loop reuses fixed buffers and does not recreate audio nodes or allocate new analyser buffers each frame.
+
+Sound Desk mute status is now explicit. When the focused active, wired channel has Live Trim at -100%, Threads Monitor reports:
+
+- SD MUTED;
+- Sound Desk Live Trim -100%;
+- the unchanged programmed Threads level.
+
+This replaces the misleading NO SIGNAL / ACTIVE combination shown in the 18:22 session screenshot. If peer channels remain audible, their composite waveform continues while the focused channel is identified as SD muted.
+
+8. SESSION TRANSPORT AND TIMER
+
+The same Play/Pause/Stop transport is available in Threads, Sound Desk, and Visualiser.
+
+- PLAY starts or resumes the shared session gate and elapsed timer.
+- PAUSE smoothly gates playback to silence and freezes elapsed time.
+- STOP smoothly gates playback to silence and resets elapsed time to 00:00:00.
+
+Pause and Stop preserve active source eligibility, programming, routes, trim, pan, and constructed audio branches. A subsequent Play resumes without oscillator reconstruction. The former separate timer controls have been removed, eliminating manual one-second trigger skew.
+
+9. CURRENT VERIFICATION
+
+- TypeScript: PASS
+- ESLint: PASS, no warnings
+- Production vinext build: PASS
+- Node model/runtime/render tests: PASS, 44/44
+- Playwright browser journeys: PASS, 13/13
+- axe serious/critical accessibility scan: PASS
+- Git diff integrity: PASS
+
+Browser coverage includes source placement and restoration, matching Channel Out wiring, disconnect-to-silence without source churn, explicit SD MUTED Monitor state, composite Monitor behavior, dynamic channel isolation, X pan, Y neutrality, Live Trim math and restoration, shared transport/timer behavior, navigation persistence, responsive behavior, reduced motion, and accessibility.
+
+10. USER REVIEW TO DATE
+
+- Milestone 08 multi-channel concurrency: passed with no notes.
+- Multi-workspace audio operation: reported clean, with no bad artefacts or unwanted sound changes.
+- Channel Out disconnect-to-silence correction: user confirmed working.
+- Sound Desk transport: user confirmed working.
+- Combined oscilloscope and paired transport timer: implemented and automatically verified.
+- SD MUTED Monitor clarification: implemented from the supplied session screenshot and automatically verified.
+
+Milestone 09 received an explicit final pass on 2026-08-12.
+
+11. INTENTIONAL MILESTONE BOUNDARIES
+
+The following remain outside Milestone 09:
+
+- distance, depth, and elevation audio;
+- binaural/HRTF or surround rendering;
+- automatic spatial distribution;
+- Blend or advanced processing semantics;
+- arbitrary graph mixing;
+- recording and sample playback;
+- Visualiser simulation systems;
+- formal large-population performance measurement planned for a later milestone.
+
+12. NEXT DECISION
+
+Milestone 09 is authorized for repository promotion. Do not begin Milestone 10 without explicit user instruction.
+
+The next valid action is one of:
+
+- verify the promoted Milestone 09 repository baseline;
+- user explicitly supplies the Milestone 10 brief.
+
+END OF REVIEW COPY

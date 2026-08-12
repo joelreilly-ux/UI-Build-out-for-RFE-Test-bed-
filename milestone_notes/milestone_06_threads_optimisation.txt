@@ -1,0 +1,117 @@
+MILESTONE 06 — THREADS OPTIMISATION + AUDIO TEST-BED PREPARATION
+
+STATUS
+
+Completed and verified as a local development state on branch local/milestones-06-07.
+Milestone 05 remains the approved recovery baseline at commit 2930487.
+Milestone 07 has not been started. Nothing has been committed, merged, pushed, or published.
+
+AUTHORITATIVE CHANNEL STATE
+
+AppState.threadChannels is the authoritative channel collection. Each channel is a complete,
+stable record containing id, label, short label, and accent. Threads, channel output terminals,
+Sound Desk, the Channel Plotter, and Visualiser all derive their visible channel population from
+that collection.
+
+The spatial reducer accepts sync-channels. It preserves assignments for identities that survive,
+adds new identities unassigned, and drops removed identities and their assignments. Terminal
+connections remain keyed by stable channel ID.
+
+IDENTITY AND LIFECYCLE
+
+Channels use monotonic IDs (channel-01, channel-02, ...). nextChannelSequence is never reduced
+when a channel is removed, so deleting CH 02 does not renumber CH 03 or cause a later channel to
+reuse CH 02's persistent identity. Accent colors cycle independently of identity and do not impose
+a channel-count ceiling.
+
+The default state contains one active, complete CH 01. Add Channel appends an incomplete channel
+and its output terminal. A module output may then complete that channel. Removal deletes only the
+target channel and its terminal connection; spatial synchronization removes only its downstream
+route. Modules, Threads, peer channels, and peer assignments are preserved.
+
+THREADS INTERFACE
+
+The former prototype navigation sidebar is replaced by collapsible Inputs & Channels. It contains
+the functional Add Channel action, active channel selection/removal, and visually subordinate text
+reserving future source categories without exposing fake controls. Collapsing it leaves channel,
+selection, Thread, and node state untouched while increasing canvas width.
+
+The top toolbar remains the home of select, pan, grid, session, zoom, and layout controls. A
+keyboard-accessible More tools control reveals module creation, workspace width, selection,
+duplication/deletion, preset, and save operations. This establishes a future manipulation-tool home
+without implementing speculative ordering or composition features.
+
+MONITOR AND DIAGNOSTICS
+
+The user-facing Diagnostics panel is now Monitor. It follows module, multi-module, Thread, and
+channel focus; shows current channel context and active channel count; exposes the selected object
+type and immediately relevant display values; and provides a static, accessible NO SIGNAL area for
+Milestone 07. It performs no audio work and has no decorative animation or render loop.
+
+State Updates is no longer rendered. The underlying AppState.updateCount instrumentation and
+withUpdate behavior are preserved unchanged for later engineering diagnostics review. No backend
+diagnostic infrastructure was deleted. No Visualiser diagnostics UI was added; the primary
+Visualiser and routing inspection remain clean.
+
+PERFORMANCE / LOCAL-FIRST
+
+No remote API, hosted database, CDN, authentication, server processing, audio processing, polling,
+or cloud runtime dependency was introduced. The existing session display interval now runs only
+while a session is active and updates once per second. The signal area is static. Channel state is
+not duplicated into independent workspace fixtures.
+
+VERIFICATION
+
+- TypeScript quality configuration: pass
+- ESLint: pass
+- Production vinext build: pass
+- Complete Node test suite: 27/27 pass
+- Complete Playwright browser suite: 7/7 pass
+- Axe serious/critical accessibility violations: 0
+- Responsive checks at desktop and 640 × 800: pass
+- Existing node construction, Inspector editing, connection geometry, session timing, workspace
+  navigation, Sound Desk plotting, shared 5 × 5 spatial grid, and Visualiser inspection: pass
+
+REGRESSION FOUND AND FIXED
+
+The first browser pass detected that the Studio/Compact layout control had been omitted during the
+toolbar reorganization. It was restored to the primary toolbar. A later strict-selector collision
+between the canvas and Monitor status text was corrected in the test. The final clean browser pass
+was 7/7.
+
+KNOWN LIMITATIONS / MILESTONE 07 CONCERNS
+
+- Channels are intentionally unnamed beyond their stable generated label; naming overhaul remains
+  out of scope.
+- Channel/lane reordering is not implemented. The expandable toolbar is its intended future home.
+- New channels begin incomplete and unplotted; users deliberately connect a node output and plot it.
+- The Monitor signal area has no samples and must only be activated by real Milestone 07 signal
+  information.
+- Milestone 07 should keep audio generation isolated from UI/spatial reducers and should avoid
+  driving React state at audio-rate frequency.
+- Saved legacy snapshots are upgraded from the prior channelId-only records during sanitization.
+
+FILES MODIFIED
+
+- app/channel-routing.ts
+- app/globals.css
+- app/interaction-state.ts
+- app/page.tsx
+- app/spatial-routing.ts
+- e2e/ui-quality-gate.spec.ts
+- tests/channel-routing.test.mjs
+- tests/rendered-html.test.mjs
+- tests/spatial-routing.test.mjs
+- milestone_notes/milestone_06_threads_optimisation.txt
+
+LOCAL / GIT STATE
+
+Worktree: /Users/requiredrequired/Documents/Codex/Test Engine. Milestones 06-07
+Branch: local/milestones-06-07
+Base commit: 29304875827e4cdc006765c898186ae0004853fa (Complete milestones 03-05)
+State: uncommitted local modifications; no merge, push, publication, or Milestone 07 work.
+
+Approved baseline checkout:
+/Users/requiredrequired/Documents/ChatGPT/Test Engine. Milestones 03-06
+Branch: agent/milestones-03-05
+State: clean at 29304875827e4cdc006765c898186ae0004853fa.

@@ -24,13 +24,22 @@ pnpm test
 
 ## What is included
 
-- Floating Audio Modules / Threads, Thread Inspector and Diagnostics windows
+- Threads, Thread Inspector and contextual Monitor windows
 - Reusable window, node, slider and diagnostic metric components
 - Centralised visual tokens in `app/globals.css`
 - Representative module graph and routing connections
 - Selectable nodes with shared Inspector state
 - Editable timing and injection controls
-- Engine running/paused state and studio/compact layout switch
+- Dynamic add/remove channel test-bed with scroll-contained large populations
+- Dynamic isolated sine sources with independent frequency, exact 1 Hz tuning, compact level and Start/Stop controls
+- Place transfers a sine player into Threads as one channel-bound output-only source node for explicit Channel Out wiring
+- Channel Out disconnection smoothly silences only that channel while preserving its source and programmed state
+- Sound Desk X-axis stereo placement and bounded relative Live Trim per plotted channel
+- Threads Monitor reports `SD MUTED` for a focused active route at -100% Live Trim instead of implying a missing signal
+- Shared Threads/Sound Desk/Visualiser Play/Pause/Stop transport paired to the elapsed session timer
+- Contextual Monitor readout with one analyser-derived composite waveform of every sounding routed channel
+- Shared session/master output separated from channel-owned audio resources
+- Session running/paused state and studio/compact layout switch
 - Responsive tablet and narrow-screen adaptations
 - Development-only UI Workshop with live token editing
 - Baseline, Studio / Spacious and Compact visual presets
@@ -41,11 +50,12 @@ pnpm test
 
 ## Milestone boundaries
 
-This shell intentionally uses mock data. It does not implement an audio engine, simulation engine, persistence, advanced routing gestures, Focus sets, Favourites or Simulation Review.
+The approved repository baseline is Milestone 09. It includes verified multi-channel concurrency, channel-bound sine source placement/wiring, X-axis stereo placement, relative Live Trim, smoothed shared transport paired to the elapsed timer, composite sounding-channel Monitor waveform, and explicit Sound Desk mute status. Y audio, distance/depth/elevation, automatic distribution, Blend/processing semantics, arbitrary graph mixing, recording and sample playback remain unimplemented.
 
 ## Main editing surfaces
 
 - `app/page.tsx` — data, reusable components, layout and local prototype state
+- `app/audio-runtime.ts` — shared Web Audio infrastructure and isolated channel-instance lifecycle
 - `app/globals.css` — design tokens, window language and responsive behavior
 - `app/ui-config.ts` — typed baseline tokens, presets and CSS-variable mapping
 - `app/ui-workshop.tsx` — development-only visual editing panel
