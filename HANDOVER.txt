@@ -6,6 +6,8 @@ State:
 - Current approved milestone: Milestone 07 — Single-Channel Audible Signal Test.
 - Completed and user-approved batch: Milestones 06–07.
 - Repository baseline being advanced: Milestone 05 at `29304875827e4cdc006765c898186ae0004853fa` to the approved combined Milestone 06–07 commit.
+- Local review branch baseline: approved Milestones 06–07 are committed locally on `agent/milestones-03-05`.
+- Remote boundary: `origin/agent/milestones-03-05` intentionally remains at Milestone 05. No GitHub push or remote merge was performed; remote reconciliation is deferred to the next end-of-day handover.
 - Current development phase: one-channel Web Audio validation is complete. Milestones 08–09 have not begun.
 - Handover updated: 2026-08-12 (Europe/London).
 
@@ -231,7 +233,8 @@ Milestones 08–09 require a fresh explicit brief. Their scope is not authorised
 
 Before beginning Milestone 08:
 - Read this handover and both Milestone 06/07 notes completely.
-- Inspect the repository/current branch and confirm a clean approved Milestone 07 baseline.
+- Work from `/Users/requiredrequired/Documents/ChatGPT/Test Engine. Milestones 03-06` and confirm the clean local `agent/milestones-03-05` branch contains the approved Milestone 07 baseline.
+- Do not reset to the older remote Milestone 05 commit or push/reconcile the remote before the next explicitly approved end-of-day handover.
 - Run baseline verification appropriate to the new brief.
 - Preserve the application/channel audio ownership split.
 - Treat the Milestone 08–09 brief as the sole source of new implementation authority.
@@ -254,6 +257,7 @@ Milestone: 07 — Single-Channel Audible Signal Test (combined approved Mileston
 Status: COMPLETE — user-approved
 Previous approved commit: `29304875827e4cdc006765c898186ae0004853fa` (Milestone 05)
 Repository branch: `agent/milestones-03-05` after local fast-forward reconciliation
+Remote branch: intentionally still Milestone 05 at `29304875827e4cdc006765c898186ae0004853fa`; push deferred
 Verification: PASS — typecheck, lint, build, 34/34 Node tests, 10/10 Playwright tests, axe, user acceptance
 Audio model: one shared application runtime/master plus isolated CH 01 source/gain/analyser instance
 Next work: Milestones 08–09 only after a new explicit brief and fresh context
