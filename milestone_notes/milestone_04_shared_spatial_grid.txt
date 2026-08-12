@@ -1,0 +1,78 @@
+RFE MILESTONE NOTE
+
+Component:
+Milestone 04 — Shared 5 × 5 Spatial Grid + Routing Inspection Layer
+
+Status:
+COMPLETE — 2026-08-11
+
+OBJECTIVE
+Establish one canonical 25-point Cartesian spatial field shared by Sound Desk and Visualiser, prove independent channel assignment/reassignment/unassignment, and expose live routing state through a lightweight Visualiser inspection layer.
+
+CANONICAL COORDINATE MODEL
+- `app/spatial-routing.ts` is the only coordinate definition.
+- X and Y values are both -2, -1, 0, 1, 2, producing exactly 25 unique points.
+- Screen orientation follows Cartesian convention: X increases left to right; Y increases bottom to top. The top rendered row is Y=2, the bottom row is Y=-2, and the centre cell is (0,0).
+- Coordinates are immutable shared values consumed through one reusable SpatialGrid renderer.
+
+ROUTING STATE
+- The application shell owns one spatialRouting reducer state, independently of the existing Threads AppState.
+- Each channel owns an optional coordinate assignment. Coordinates do not own a single channel slot.
+- `getChannelsAtCoordinate` derives zero, one, or multiple channel records from authoritative channel state. This deliberately permits future stacked routing without implementing stacked interaction or mixing in Milestone 04.
+- Assigning a channel replaces only that channel's assignment. Unassigning retains channel identity with a null assignment.
+
+CONTROLLED FIXTURE
+- CH 01 -> (0,0)
+- CH 02 -> (-2,-1)
+- CH 03 -> (1,2)
+- CH 04 -> (-1,1)
+- CH 05 -> (2,0)
+- Five channels are the current minimum active UI fixture, not an architectural maximum.
+- CH 01 through CH 05 automatically use Muted Coral, Warm Stone, Moss Green, Utility Blue and Air Blue respectively from the canonical muted palette.
+
+SOUND DESK
+- Displays all 25 points, coordinate labels, an identifiable origin, occupied nodes, and orientation guidance.
+- Uses the approved lightweight plot treatment: 70%-opacity mid-grey dashed axes and enlarged circular intersection markers showing `x,y` while empty and zero-padded channel numbers such as `01` when occupied.
+- A clearly labelled development-fixture panel supplies temporary coordinate selectors for assign/reassign/unassign testing.
+- The grid is square and uses the same canonical point order at desktop, tablet and compact widths.
+
+VISUALISER
+- Remains a non-simulation surface.
+- A lightweight toggle reveals or hides a translucent routing inspection layer.
+- The overlay renders the same SpatialGrid component and the same spatialRouting state as Sound Desk.
+- Occupied nodes carry channel identifiers; empty points remain visually quiet; orientation and origin remain visible.
+
+ACCEPTANCE RESULTS
+- Initial five-channel placement and five distinct canonical palette colours: PASS
+- CH 02 reassignment (-2,-1) -> (2,-2): PASS; old point clears and CH 01/CH 03 remain unchanged
+- CH 03 unassignment from (1,2): PASS; channel remains valid and both workspace representations clear the old point
+- Visualiser observation of authoritative Sound Desk routing state: PASS
+- Future stacked assignment model test: PASS; CH 01 and CH 02 can be derived at the same origin without collision-state migration
+
+VERIFICATION
+- TypeScript: PASS
+- ESLint: PASS
+- Production build: PASS
+- Model/render tests: PASS, 22/22
+- Playwright interaction/routing/navigation/accessibility tests: PASS, 6/6
+- Existing Threads interaction journey: PASS
+- Milestone 03 navigation and shared timer: PASS
+- axe serious/critical scan: PASS
+- 32-module / 32-Thread fixture preparation: PASS
+
+POST-COMPLETION THREADS REPAIR
+- Fixed a workspace-remount regression where the canvas ResizeObserver remained attached to the previous, disconnected Threads canvas after directional navigation.
+- The observer now follows the active Threads surface, ignores zero-sized measurements, and immediately measures each remounted canvas.
+- Browser regression coverage verifies Thread-to-port alignment and successful new Thread creation after Threads -> Sound Desk -> Visualiser -> Sound Desk -> Threads.
+
+POST-COMPLETION CHANNEL LEGIBILITY REFINEMENT
+- Increased circular spatial plot markers by approximately 33% and removed the parenthesis characters that had only represented the circle in the visual brief.
+- Added five automatically distinct channel colours sourced from the canonical muted palette.
+- Added five equal horizontal reading bands behind the Threads canvas, separated by the same 70%-opacity dashed line treatment and keyed 01 through 05 with their channel colours.
+- The Threads bands are presentation-only guides. They do not assign modules to channels or change Thread routing semantics.
+
+STOP BOUNDARY
+Milestone 04 stops at the canonical coordinate field, controlled fixture routing, Sound Desk representation, Visualiser inspection overlay and verification. No real input/channel workflow, mixing, distribution pattern, audio engine, simulation, particle or field behavior has been implemented; the five-channel fixture and Threads bands are visual infrastructure only.
+
+RECOMMENDATION FOR MILESTONE 05
+Replace or adapt the temporary fixture controls through a dedicated production channel/input workflow while retaining channel-owned optional assignments and the canonical coordinate module. If stacked placement becomes user-facing, add explicit selection/inspection interaction without converting the underlying model to coordinate-owned occupancy.

@@ -257,7 +257,7 @@ export const BASELINE_UI_CONFIG: UIConfig = {
     lg: 18,
     xl: 24,
     windowGap: 10,
-    workspacePadding: 7,
+    workspacePadding: 12,
     sectionSpacing: 13,
     navigationGap: 4,
   },
@@ -268,11 +268,11 @@ export const BASELINE_UI_CONFIG: UIConfig = {
     titlebarHeight: 42,
     toolbarHeight: 43,
     navigationItemHeight: 34,
-    nodeMinHeight: 70,
+    nodeMinHeight: 48,
   },
   nodes: {
-    nodeWidth: 159,
-    nodePadding: 19,
+    nodeWidth: 135,
+    nodePadding: 8,
     groupingAccentStyle: "inset-bar",
     groupingAccentInset: 1,
     groupingAccentSideInset: 3,
@@ -349,6 +349,9 @@ export const DARK_UI_CONFIG: UIConfig = {
     diagnosticsFooter: "#11161a",
   },
   geometry: { ...BASELINE_UI_CONFIG.geometry, shadowOpacity: 0.18, shadowBlur: 20 },
+  spacing: { ...BASELINE_UI_CONFIG.spacing, workspacePadding: 12 },
+  layout: { ...BASELINE_UI_CONFIG.layout, nodeMinHeight: 48 },
+  nodes: { ...BASELINE_UI_CONFIG.nodes, nodeWidth: 135, nodePadding: 8 },
 };
 
 export const UI_PRESETS: Record<string, UIConfig> = {
@@ -356,20 +359,20 @@ export const UI_PRESETS: Record<string, UIConfig> = {
   "Dark Utility": DARK_UI_CONFIG,
   "Spacious Light": {
     ...BASELINE_UI_CONFIG,
-    spacing: { ...BASELINE_UI_CONFIG.spacing, windowGap: 20, workspacePadding: 18, sectionSpacing: 16 },
-    layout: { ...BASELINE_UI_CONFIG.layout, navigationWidth: 184, inspectorWidth: 328, diagnosticsHeight: 164 },
-    nodes: { ...BASELINE_UI_CONFIG.nodes, nodeWidth: 148, nodePadding: 14 },
+    spacing: { ...BASELINE_UI_CONFIG.spacing, windowGap: 20, workspacePadding: 12, sectionSpacing: 16 },
+    layout: { ...BASELINE_UI_CONFIG.layout, navigationWidth: 184, inspectorWidth: 328, diagnosticsHeight: 164, nodeMinHeight: 48 },
+    nodes: { ...BASELINE_UI_CONFIG.nodes, nodeWidth: 135, nodePadding: 8 },
   },
   Compact: {
     ...BASELINE_UI_CONFIG,
     typography: { ...BASELINE_UI_CONFIG.typography, baseSize: 12, labelSize: 7, headingSize: 10, readoutSize: 18 },
-    spacing: { ...BASELINE_UI_CONFIG.spacing, windowGap: 8, workspacePadding: 8, sectionSpacing: 10 },
-    layout: { ...BASELINE_UI_CONFIG.layout, navigationWidth: 145, inspectorWidth: 270, diagnosticsHeight: 132 },
-    nodes: { ...BASELINE_UI_CONFIG.nodes, nodeWidth: 132, nodePadding: 10, portSize: 6 },
+    spacing: { ...BASELINE_UI_CONFIG.spacing, windowGap: 8, workspacePadding: 12, sectionSpacing: 10 },
+    layout: { ...BASELINE_UI_CONFIG.layout, navigationWidth: 145, inspectorWidth: 270, diagnosticsHeight: 132, nodeMinHeight: 48 },
+    nodes: { ...BASELINE_UI_CONFIG.nodes, nodeWidth: 135, nodePadding: 8, portSize: 6 },
   },
 };
 
-export const UI_CONFIG_REVISION = "utility-led-baseline-2026-08-10-06";
+export const UI_CONFIG_REVISION = "approved-ui-interaction-baseline-2026-08-11-08";
 export const UI_CONFIG_STORAGE_KEY = "rfe-ui-workshop-config-v5";
 export const UI_THEME_STORAGE_KEY = "rfe-ui-theme-v1";
 export const MODULE_ACCENTS_STORAGE_KEY = "rfe-module-accents-v1";

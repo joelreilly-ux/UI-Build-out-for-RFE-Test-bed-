@@ -1,0 +1,42 @@
+RFE MILESTONE NOTE
+
+Component:
+Milestone 03 — Multi-Workspace Architecture + Directional Navigation
+
+Status:
+COMPLETE — 2026-08-11
+
+OBJECTIVE
+Establish Threads, Sound Desk and Visualiser as three ordered surfaces in one directional workstation. Preserve the approved Threads interaction harness, keep future workspaces intentionally sparse, and introduce navigation without requiring inactive future engines to remain mounted.
+
+ARCHITECTURE
+- `app/workspace-navigation.ts` owns the typed workspace order and pure adjacent-navigation/transition helpers.
+- `app/page.tsx` remains the application shell and retains the canonical Threads reducer state above the active workspace surface.
+- The canonical elapsed session timer is rendered by the shared shell, remains visible in all three workspaces, and reads the same reducer-owned session state without per-workspace copies.
+- Only the active workspace surface is rendered. Returning to Threads reuses the reducer state retained by the shell; future heavy rendering or processing systems will not need to remain active merely to preserve navigation state.
+- Leaving Threads cancels only an unfinished draft connection. Committed Threads, module state, selections, parameters, layout, canvas state, preset state and elapsed session state remain intact.
+- Sound Desk and Visualiser contain only structural workspace boundaries and explicit inactive-state copy. No audio, grid, mixer, visualisation, particle or simulation façade was added.
+
+NAVIGATION
+- The approved order is Threads -> Sound Desk -> Visualiser.
+- Small edge controls appear only at available neighbouring edges, around the horizontal viewport midpoint. They expose destination labels on hover/focus and use a deliberately narrow activation area.
+- A compact bottom-right previous/next control is shown for coarse pointers, devices without hover, and compact supported viewports.
+- Navigation buttons expose destination-specific accessible names. Global arrow keys and swipe gestures are not used.
+- Adjacent workspace changes use a 180ms directional translate/fade. Reduced-motion preferences remove this animation.
+- Boundary helpers return no destination before Threads or after Visualiser.
+
+VERIFICATION
+- TypeScript: PASS
+- ESLint: PASS
+- Production build: PASS
+- Model/render tests: PASS, 16/16
+- Playwright interaction/navigation/accessibility tests: PASS, 5/5
+- Existing Threads interaction journey: PASS
+- axe serious/critical scan: PASS
+- 32-module / 32-Thread fixture preparation: PASS
+
+STOP BOUNDARY
+Milestone 03 stops at workspace architecture, navigation, responsive fallback and verification. Sound Grid, Visualiser Grid, sound processing, mixer behaviour, distribution systems, particle systems and simulation work remain unimplemented.
+
+RECOMMENDATION FOR MILESTONE 04
+Place future Sound Desk state and lifecycle inside a dedicated workspace module while keeping only genuinely shared selection/routing contracts in the application shell. Do not mount audio processing merely to support navigation or visual continuity.
