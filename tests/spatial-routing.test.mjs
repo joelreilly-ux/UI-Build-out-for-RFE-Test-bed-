@@ -24,6 +24,7 @@ test("spatial state derives its channel population from authoritative Threads st
   assert.deepEqual(state.channels.map((channel) => channel.id), channels.map((channel) => channel.id));
   assert.equal(coordinateKey(state.channels[0].assignment), "0,0");
   assert.equal(state.channels.slice(1).every((channel) => channel.assignment === null), true);
+  assert.equal(state.channels.every((channel) => channel.liveTrim === 0), true);
 });
 
 test("sync adds and removes identities while retaining surviving assignments", () => {
@@ -32,10 +33,25 @@ test("sync adds and removes identities while retaining surviving assignments", (
   assert.ok(destination);
   let state = createInitialSpatialRoutingState(channels);
   state = spatialRoutingReducer(state, { type: "assign-channel", channelId: "channel-02", coordinate: destination });
+  state = spatialRoutingReducer(state, { type: "set-live-trim", channelId: "channel-03", value: 16 });
   state = spatialRoutingReducer(state, { type: "sync-channels", channels: [channels[0], channels[2], createChannelDefinition(4)] });
   assert.deepEqual(state.channels.map((channel) => channel.id), ["channel-01", "channel-03", "channel-04"]);
   assert.equal(coordinateKey(state.channels[0].assignment), "0,0");
   assert.equal(state.channels[2].assignment, null);
+  assert.equal(state.channels[1].liveTrim, 16);
+  assert.equal(state.channels[2].liveTrim, 0);
+});
+
+test("Live Trim is channel-owned, bounded, and independent of programmed routing coordinates", () => {
+  const channels = [createChannelDefinition(1), createChannelDefinition(2)];
+  let state = createInitialSpatialRoutingState(channels);
+  const originalCoordinate = state.channels[0].assignment;
+  state = spatialRoutingReducer(state, { type: "set-live-trim", channelId: "channel-01", value: 50 });
+  state = spatialRoutingReducer(state, { type: "set-live-trim", channelId: "channel-02", value: -150 });
+  assert.equal(state.channels[0].liveTrim, 16);
+  assert.equal(state.channels[1].liveTrim, -100);
+  assert.equal(state.channels[0].assignment, originalCoordinate);
+  assert.equal(state.channels[1].assignment, null);
 });
 
 test("channel-owned assignments permit stacked routing without collision state", () => {

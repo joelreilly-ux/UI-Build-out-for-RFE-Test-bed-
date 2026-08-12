@@ -41,6 +41,7 @@ export type ModuleInstance = {
   parameters: ModuleParameters;
   accentId: AccentId | null;
   ports: { input: boolean; output: boolean };
+  audioChannelId?: ChannelId;
 };
 
 export type ThreadConnection = {
@@ -96,6 +97,7 @@ export type AppAction =
   | { type: "commit-channel-output"; channelId: ChannelId }
   | { type: "remove-channel-output"; channelId: ChannelId }
   | { type: "add-channel" }
+  | { type: "place-channel-source"; channelId: ChannelId }
   | { type: "remove-channel"; channelId: ChannelId }
   | { type: "select-channel"; channelId: ChannelId }
   | { type: "cancel-connection" }
@@ -113,6 +115,9 @@ export type AppAction =
   | { type: "load-state"; value: AppState }
   | { type: "set-preset-name"; value: string }
   | { type: "set-status"; value: string }
+  | { type: "play-session"; now: number }
+  | { type: "pause-session"; now: number }
+  | { type: "stop-session"; now: number }
   | { type: "toggle-session"; now: number }
   | { type: "reset-session"; now: number };
 
@@ -143,6 +148,17 @@ const moduleDefinitions: Array<Omit<ModuleInstance, "parameters" | "accentId" | 
   { id: "mapping", type: "particle-mapping", title: "Particle Mapping", eyebrow: "Route", kind: "routing", enabled: true, position: { x: 60, y: 67 }, parameters: { output: "Field A" } },
   { id: "audio", type: "audio-in", title: "Audio In", eyebrow: "Future module", kind: "future", enabled: false, position: { x: 33, y: 84 }, parameters: { status: "bypassed" } },
 ];
+
+const sineSourceDefinition: Omit<ModuleInstance, "parameters" | "accentId" | "ports"> & { parameters?: Partial<ModuleParameters> } = {
+  id: "sine-source",
+  type: "sine-source",
+  title: "Sine Source",
+  eyebrow: "Channel source",
+  kind: "source",
+  enabled: true,
+  position: { x: 12, y: 12 },
+  parameters: { status: "active" },
+};
 
 export const MODULE_LIBRARY = moduleDefinitions.filter((definition) => definition.enabled).map((definition) => ({ type: definition.type as ModuleTemplateType, title: definition.title }));
 
@@ -281,6 +297,7 @@ export function getModuleDisplay(module: ModuleInstance): { detail: string; valu
     case "seed-injection": return { detail: `Weight ${(module.parameters.seedWeight / 100).toFixed(2)}`, value: (module.parameters.injectStrength / 100).toFixed(2) };
     case "sample-slots": return { detail: module.parameters.status[0].toUpperCase() + module.parameters.status.slice(1), value: "12 / 16" };
     case "particle-mapping": return { detail: "Harmonic map", value: module.parameters.output };
+    case "sine-source": return { detail: module.audioChannelId?.replace("channel-", "CH ") ?? "UNBOUND", value: "SINE" };
     default: return { detail: module.parameters.scale, value: module.parameters.duration };
   }
 }
@@ -297,6 +314,15 @@ function moduleSelection(ids: string[]): Selection {
   if (!ids.length) return null;
   if (ids.length === 1) return { kind: "module", id: ids[0] };
   return { kind: "module", id: ids[ids.length - 1], ids };
+}
+
+function findSourcePlacement(modules: readonly ModuleInstance[], preferredIndex: number) {
+  const candidates = [
+    { x: 51, y: 6 }, { x: 18, y: 18 }, { x: 51, y: 48 }, { x: 15, y: 82 },
+    { x: 51, y: 82 }, { x: 76, y: 6 }, { x: 76, y: 58 }, { x: 2, y: 48 },
+  ];
+  const ordered = [...candidates.slice(preferredIndex % candidates.length), ...candidates.slice(0, preferredIndex % candidates.length)];
+  return ordered.find((candidate) => modules.every((module) => Math.abs(module.position.x - candidate.x) >= 15 || Math.abs(module.position.y - candidate.y) >= 14)) ?? { x: 42 + preferredIndex % 5 * 6, y: 42 + preferredIndex % 4 * 8 };
 }
 
 export function appReducer(state: AppState, action: AppAction): AppState {
@@ -349,6 +375,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     case "duplicate-selection": {
       const selectedIds = getSelectedModuleIds(state.selection);
       if (!selectedIds.length) return state;
+      if (state.modules.some((module) => selectedIds.includes(module.id) && module.audioChannelId)) return withUpdate(state, { statusMessage: "Channel-bound sine sources cannot be duplicated; place them from their channel" });
       const idMap = new Map(selectedIds.map((id) => [id, `${state.modules.find((module) => module.id === id)?.type ?? "module"}-${crypto.randomUUID()}`]));
       const duplicates = state.modules.filter((module) => selectedIds.includes(module.id)).map((module) => ({
         ...module,
@@ -399,15 +426,35 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         statusMessage: `${channel.label} added`,
       });
     }
+    case "place-channel-source": {
+      const channel = state.threadChannels.find((item) => item.id === action.channelId);
+      if (!channel) return state;
+      const existing = state.modules.find((module) => module.audioChannelId === channel.id && module.type === "sine-source");
+      if (existing) return withUpdate(state, { selection: { kind: "module", id: existing.id }, pendingConnectionFrom: null, statusMessage: `${channel.label} sine source already placed` });
+      const channelIndex = state.threadChannels.findIndex((item) => item.id === channel.id);
+      const id = `sine-source-${channel.id}-${crypto.randomUUID()}`;
+      const instance = createModule(sineSourceDefinition, {
+        id,
+        title: `${channel.label} Sine`,
+        audioChannelId: channel.id,
+        accentId: channel.accentId,
+        ports: { input: false, output: true },
+        position: findSourcePlacement(state.modules, channelIndex),
+      });
+      return withUpdate(state, { modules: [...state.modules, instance], selection: { kind: "module", id }, pendingConnectionFrom: null, statusMessage: `${channel.label} sine source placed — connect its output to ${channel.label} Channel Out` });
+    }
     case "remove-channel": {
       const channel = state.threadChannels.find((item) => item.id === action.channelId);
       if (!channel) return state;
       const threadChannels = state.threadChannels.filter((item) => item.id !== action.channelId);
+      const removedSourceIds = state.modules.filter((module) => module.audioChannelId === action.channelId).map((module) => module.id);
       return withUpdate(state, {
+        modules: state.modules.filter((module) => !removedSourceIds.includes(module.id)),
+        connections: state.connections.filter((connection) => !removedSourceIds.includes(connection.fromModuleId) && !removedSourceIds.includes(connection.toModuleId)),
         threadChannels,
         channelTerminalConnections: state.channelTerminalConnections.filter((connection) => connection.channelId !== action.channelId),
         nextChannelSequence: getNextChannelSequence(threadChannels),
-        selection: state.selection?.kind === "channel" && state.selection.id === action.channelId ? null : state.selection,
+        selection: (state.selection?.kind === "channel" && state.selection.id === action.channelId) || (state.selection?.kind === "module" && removedSourceIds.includes(state.selection.id)) ? null : state.selection,
         pendingConnectionFrom: null,
         statusMessage: `${channel.label} removed`,
       });
@@ -441,6 +488,9 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     case "load-state": return { ...action.value, session: state.session, updateCount: state.updateCount + 1, statusMessage: "Saved preset restored" };
     case "set-preset-name": return withUpdate(state, { presetName: action.value });
     case "set-status": return { ...state, statusMessage: action.value };
+    case "play-session": return state.session.running ? state : withUpdate(state, { session: { ...state.session, running: true, startedAt: action.now }, statusMessage: "Test session playing" });
+    case "pause-session": return !state.session.running ? state : withUpdate(state, { session: { running: false, startedAt: null, accumulatedMs: getElapsedMs(state.session, action.now) }, statusMessage: "Test session paused" });
+    case "stop-session": return withUpdate(state, { session: { running: false, startedAt: null, accumulatedMs: 0 }, statusMessage: "Test session stopped" });
     case "toggle-session": {
       const session = state.session.running
         ? { running: false, startedAt: null, accumulatedMs: getElapsedMs(state.session, action.now) }

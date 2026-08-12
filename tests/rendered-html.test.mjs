@@ -40,7 +40,10 @@ test("server-renders the RFE structural shell", async () => {
   assert.match(html, /START SINE/);
   assert.match(html, /ELAPSED/);
   assert.match(html, /shell-elapsed-readout/);
-  assert.match(html, />Start</);
+  assert.match(html, /aria-label="Session transport"/);
+  assert.match(html, /aria-label="Play session"/);
+  assert.match(html, />PAUSE</);
+  assert.match(html, />STOP</);
   assert.doesNotMatch(html, /State Updates/);
   assert.match(html, /Note Length/);
   assert.match(html, /Colour theme/);

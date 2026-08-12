@@ -1,0 +1,182 @@
+# Milestone 09 — Spatial session and live performance control
+
+## Status and repository boundary
+
+Implementation, automated verification, and user audible/manual acceptance are complete. On 2026-08-12 the user explicitly approved Milestone 09 and authorized the combined Milestones 08–09 batch for commit and promotion as the new repository baseline. Milestone 10 has not begun.
+
+## Files modified in Milestone 09
+
+- `app/audio-runtime.ts`
+- `app/spatial-routing.ts`
+- `app/page.tsx`
+- `app/globals.css`
+- `tests/audio-runtime.test.mjs`
+- `tests/spatial-routing.test.mjs`
+- `e2e/ui-quality-gate.spec.ts`
+- `milestone_notes/milestone_09_spatial_session.txt` (new)
+- `HANDOVER.txt`
+- `QUALITY_GATE.md`
+- `README.md`
+
+## Post-verification source-placement correction
+
+User review identified a construction-path gap: dynamically created sine players could sound, but they had no corresponding Threads source node and therefore could not be explicitly wired into Channel Out before plotting. This is now corrected.
+
+Every unplaced channel player exposes `PLACE SOURCE`. The action creates exactly one stable channel-bound `sine-source` module with an output-only port, selects it on the Threads canvas, and prevents duplicate placement. The source may connect only to its matching Channel Out; attempting to connect it to a different stable channel identity is rejected.
+
+Placement behaves as a transfer rather than a duplicate UI. Once placed, the full sine player disappears from Inputs & Channels so the sidebar stays compact. Selecting the placed node exposes frequency, level and Start/Stop in Inspector. Removing the node clears attached Threads/Channel Out connectivity and returns the player plus Place action to Inputs & Channels. Removing the channel also removes its placed source and attached graph state. Channel-bound source nodes cannot be duplicated.
+
+## Post-listening routing and transport correction
+
+User listening confirmed clean multi-workspace playback but exposed an audibility gap: disconnecting a sounding source from Channel Out correctly made the channel incomplete yet left its audio audible. Channel completeness now drives a per-channel routability gate using the existing Live Trim gain. Disconnect ramps only that channel to silence; it does not destroy its oscillator, change its programmed level/trim, or disturb peer channels. Reconnecting restores the prior trim multiplier with the same smoothing policy.
+
+The shared PLAY, PAUSE, and STOP transport is now present in the Sound Desk title bar as well as Visualiser. Both surfaces control the same session gate and report the same authoritative transport state.
+
+The same transport is now also used in Threads and directly owns the elapsed session timer: PLAY starts or resumes it, PAUSE freezes it, and STOP resets it to `00:00:00`. The former separate Start/Pause and Reset-time controls have been removed, eliminating manual trigger skew.
+
+## Stereo spatial architecture
+
+The local audio graph is now:
+
+`SINE -> SOURCE ENVELOPE -> PROGRAMMED CHANNEL GAIN -> LIVE TRIM GAIN -> CHANNEL ANALYSER -> CHANNEL STEREO PANNER -> SHARED SESSION GATE -> SHARED MASTER -> DEVICE`
+
+Application ownership remains one lazily created AudioContext, one shared session playback gate, one shared master, and application shutdown. Every stable ChannelId owns its oscillator/envelope, programmed gain, relative trim gain, analyser, StereoPannerNode, frequency, programmed level, trim, pan, active state, and scoped disposal.
+
+No UI component owns or rebuilds this graph. Sound Desk and Visualiser call the shared runtime using authoritative shell state.
+
+## X-to-pan mapping and Y neutrality
+
+Canonical X maps linearly to native StereoPannerNode pan:
+
+- X -2 -> pan -1.0
+- X -1 -> pan -0.5
+- X 0 -> pan 0
+- X +1 -> pan +0.5
+- X +2 -> pan +1.0
+
+Sound Desk assignment changes synchronize `assignment.x` into the matching stable channel branch. Changing Y while X remains constant invokes the same X value and therefore leaves audible pan unchanged. No runtime API accepts Y and no Y-derived gain, filter, delay, reverb, distance, elevation, HRTF, or other audio stage exists.
+
+Live replotting ramps the existing panner AudioParam. It does not start/restart an oscillator, recreate a panner/channel/master, reset frequency/level/trim, or touch peer branches.
+
+## Global smoothing standard
+
+`LIVE_AUDIO_RAMP_SECONDS` is the reusable 20 ms live-audio transition standard. The audio-layer `smooth()` helper cancels pending automation, anchors at the current AudioParam value, and linearly ramps to the target. Lightweight diagnostics count smoothing ramps.
+
+The standard is used for:
+
+- source attack and stop envelope;
+- programmed level changes;
+- frequency changes;
+- Live Trim, including mute/unmute;
+- pan/replot changes;
+- session Play/Resume, Pause, and Stop.
+
+Stop schedules oscillator disposal after its envelope reaches silence. These are immediate-feeling click/pop protection ramps, not musical fades.
+
+## Sound Desk Live Trim and exact math
+
+Each plotted/routable channel row exposes a compact `LIVE TRIM` range from -100 through +16, default 0, plus a dedicated zero-reset control and a subtle zero-state marker.
+
+Trim is stored in `SpatialRoutingState.channels[].liveTrim`, separately from the programmed level stored in the audio runtime's channel configuration. It survives Sound Desk/Visualiser/Threads navigation and dynamic channel synchronization, while removed channels lose only their own trim/route state.
+
+Multiplier:
+
+`multiplier = 1 + clamp(trim, -100, 16) / 100`
+
+Effective level:
+
+`effective level = programmed level * multiplier`
+
+Examples at programmed 20%:
+
+- +16 -> 20 * 1.16 = 23.2%
+- 0 -> 20 * 1 = 20%
+- -50 -> 20 * 0.5 = 10%
+- -100 -> 20 * 0 = silence
+
+Mute only ramps that channel's trim gain to zero. It does not stop its oscillator, alter its programmed level, remove it, change its coordinate, or affect peers. Resetting trim to zero restores the exact programmed level.
+
+When the focused active, routed channel is at -100% Live Trim, Threads Monitor explicitly reports `SD MUTED` and `Sound Desk Live Trim -100%` in its waveform, object-detail, and Audio readouts. This replaces the ambiguous `NO SIGNAL`/`ACTIVE` combination while leaving the programmed Threads level visible and unchanged. If peers remain audible, their composite waveform continues and identifies the focused channel as SD muted.
+
+## Shared Sound Desk/Visualiser transport and session-gate semantics
+
+Sound Desk and Visualiser expose the same restrained PLAY, PAUSE, and STOP controls plus truthful playback-state text.
+
+- PLAY/Resume ramps the shared session gate to 1. It does not start inactive channels or create sources.
+- PAUSE ramps the gate to 0 while preserving every active source and all programming, trim, coordinate, graph, and identity state.
+- STOP also ramps the gate to 0 and records a distinct stopped transport state. It deliberately preserves active source eligibility and the constructed session so the next PLAY returns without oscillator reconstruction.
+
+At this milestone, Pause and Stop use the same non-destructive audio gate but retain different explicit transport states. Pause communicates temporary suspension; Stop communicates a clean stopped session boundary. Neither owns channel sources. This is the minimum transport model required by the brief and avoids unnecessary source churn.
+
+Threads individual Start/Stop remains channel-source test control. The shared workspace transport gates the assembled active set. Starting a source while the session is paused/stopped prepares it but it remains inaudible until PLAY; stopping a source removes only that channel regardless of session-gate state.
+
+## Monitor behaviour and performance
+
+Monitor text remains contextual to the selected/focused channel. Its oscilloscope is again one composite trace: every currently sounding, routed channel analyser is summed into the same normalized waveform so phase interaction, reinforcement, cancellation and beating can be viewed together. Unrouted, muted, paused and stopped channels are excluded because they are not audible. Selection never changes playback or the composite.
+
+Every channel keeps the existing small analyser (`fftSize = 512`), while only the mounted Monitor owns one requestAnimationFrame loop. That loop reuses fixed buffers, reads each sounding channel once per frame and does not allocate or recreate source/analyser nodes. Five-channel browser interaction remained responsive, but larger active populations require formal measurement in Milestone 10.
+
+## Safety and headroom
+
+Milestone 08 conservative staging remains: maximum programmed channel gain 0.2 and shared master gain 0.8. Live Trim is capped at multiplier 1.16 and cannot become an independent full-scale amplifier. Smoothing prevents avoidable transient spikes. This bounded design is not a complete limiter or overload guarantee for arbitrary future channel counts; no compressor, limiter, effects, or mastering chain was added.
+
+## Automated tests added/changed
+
+Runtime/model coverage now proves:
+
+- exact five-point X-to-pan mapping;
+- channel-owned panner creation/disposal and connection order;
+- independent panner state and live update without source creation;
+- Y has no runtime/audio parameter path;
+- Live Trim default 0 and reducer bounds -100/+16;
+- +16 multiplicative level math, -50 attenuation, -100 mute, and zero restoration;
+- trim does not mutate programmed level or coordinates;
+- smoothing counters advance for source, level, trim, pan, and transport changes;
+- one shared session gate/master;
+- Play/Pause/Stop preserve active/inactive sources and configuration;
+- transport never creates channels/sources or replaces shared infrastructure.
+- Channel Out disconnection ramps only the affected channel to silence without source destruction, and reconnection restores its prior relative trim.
+
+The new browser journeys cover channel-bound source placement, matching Channel Out wiring, Sound Desk transport visibility, disconnect-to-silence without source churn, and source-node removal/restoration. The spatial journey creates two channels, keeps one intentionally inactive, replots active CH 01 across X while preserving source counts, changes Y with fixed X, exercises +16/-50/-100/zero trim and verifies Threads stays at 20%, performs Play/Pause/Resume/Stop/Play, then navigates back through Sound Desk and Threads while asserting coordinate, trim, pan, source, gate, master, and active-state truth.
+
+## Complete verification
+
+- TypeScript: PASS
+- ESLint: PASS, no warnings
+- Production vinext build: PASS
+- Node model/runtime/render tests: PASS, 44/44
+- Playwright browser tests: PASS, 13/13
+- axe serious/critical scan: PASS
+- Existing Milestones 01–08 regression coverage: PASS
+- Git diff integrity: PASS
+
+## Programmatic vs audible acceptance
+
+Programmatic tests prove graph topology, AudioParam targets, ramp calls, runtime/node/source counts, state boundaries, navigation persistence, and real-browser UI behavior. They do not prove subjective stereo travel, perceived trim balance, click/pop cleanliness, transient severity, output-device behavior, or headphone/speaker safety.
+
+User listening found no bad artefacts or unwanted sound changes across workspaces. Manual confirmation remains required for the corrected disconnect-to-silence/reconnect path and the new Sound Desk transport surface, at conservative volume.
+
+## Regressions discovered/fixed
+
+The first lint pass found an unstable React effect dependency for the active-channel waveform overlay. The dependency is now a stable channel-ID key. During the post-review placement rerun, one older browser test read the development diagnostics handle before its mount effect completed; the test now waits for that handle before inspection. User listening then exposed the incomplete-channel audibility gap; routability is now synchronized from authoritative Threads connectivity and smoothed through the existing channel trim stage. Final lint passes with no warnings and the complete browser rerun passes.
+
+## Known limitations and future concerns
+
+- Y remains deliberately acoustically neutral.
+- StereoPannerNode provides basic stereo placement, not distance, depth, elevation, binaural/HRTF, or surround behavior.
+- Stop preserves active oscillators behind the closed session gate. This keeps restart immediate and non-destructive; a future long-session resource policy may distinguish parked sources from active computation if needed.
+- The oscilloscope reads all active analyser buffers in one frame loop. Milestone 10 should measure large-population CPU/render cost and audio stability.
+- Live Trim/spatial routing is shell-session state and not yet part of durable saved project persistence.
+- The visual ordinary-module graph can still show multiple Threads into one module input. No real processing graph consumes those Threads, so Milestone 09 adds no hidden summing. Before modules become audible, enforce one resolved input or use the future explicit two-input Blend module.
+- Future processing/spatial modules must remain channel-owned before the session gate and must not appropriate application master/session ownership.
+
+## Exact local/Git state
+
+- Worktree: `/Users/requiredrequired/Documents/ChatGPT/Test Engine. Milestones 03-06`
+- Branch: `agent/milestones-03-05`
+- HEAD before local 08–09 edits: `2bc63fc` (`Clarify local handover boundary`)
+- Approved Milestone 07 commit: `3a3393d` (`Complete milestones 06-07`)
+- Promotion target: remote project branch `milestone/ui-interaction-harness`
+- Milestones 08–09: approved Milestone 09 baseline
+- Commit/merge/push: authorized and completed as the Milestone 09 baseline on 2026-08-12
+- Milestone 10: not started

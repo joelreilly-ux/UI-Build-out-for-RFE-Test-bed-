@@ -18,7 +18,7 @@ export type ChannelTerminalConnection = Readonly<{
 }>;
 
 export type ChannelSourceState = Readonly<{
-  modules: readonly Readonly<{ id: string; enabled: boolean; ports: Readonly<{ output: boolean }> }>[];
+  modules: readonly Readonly<{ id: string; enabled: boolean; audioChannelId?: ChannelId; ports: Readonly<{ output: boolean }> }>[];
   threadChannels: readonly ThreadChannel[];
   channelTerminalConnections: readonly ChannelTerminalConnection[];
 }>;
@@ -63,6 +63,7 @@ export function canConnectChannelTerminal(state: ChannelSourceState, fromModuleI
   const channel = state.threadChannels.find((item) => item.id === channelId);
   if (!source || !channel) return { valid: false, reason: "Channel endpoint unavailable" };
   if (!source.enabled || !source.ports.output) return { valid: false, reason: "This module cannot feed a channel output" };
+  if (source.audioChannelId && source.audioChannelId !== channel.id) return { valid: false, reason: `This sine source belongs to ${source.audioChannelId.replace("channel-", "CH ")}` };
   if (state.channelTerminalConnections.some((connection) => connection.channelId === channelId)) return { valid: false, reason: "Channel output is already complete" };
   return { valid: true, reason: "Valid channel output" };
 }

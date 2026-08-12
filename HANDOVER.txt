@@ -3,17 +3,18 @@ RFE PROTOTYPE TEST-BED — PROJECT HANDOVER
 1. PROJECT STATE
 
 State:
-- Current approved milestone: Milestone 07 — Single-Channel Audible Signal Test.
-- Completed and user-approved batch: Milestones 06–07.
-- Repository baseline being advanced: Milestone 05 at `29304875827e4cdc006765c898186ae0004853fa` to the approved combined Milestone 06–07 commit.
-- Local review branch baseline: approved Milestones 06–07 are committed locally on `agent/milestones-03-05`.
-- Remote boundary: `origin/agent/milestones-03-05` intentionally remains at Milestone 05. No GitHub push or remote merge was performed; remote reconciliation is deferred to the next end-of-day handover.
-- Current development phase: one-channel Web Audio validation is complete. Milestones 08–09 have not begun.
+- Current approved milestone: Milestone 09 — Spatial Session + Live Performance Control.
+- Completed and user-approved batch: Milestones 06–09.
+- Current local development state: Milestone 09 is implemented, automatically verified, and user-approved for promotion as the new repository baseline.
+- Repository baseline: approved Milestone 09, containing the complete Milestones 06–09 progression.
+- Source branch: `agent/milestones-03-05`.
+- Project/default branch: `milestone/ui-interaction-harness`, promoted to the Milestone 09 baseline on 2026-08-12.
+- Current development phase: the combined Milestones 08–09 batch is complete and approved. Milestone 10 has not begun.
 - Handover updated: 2026-08-12 (Europe/London).
 
-The application is a local RFE research-interface prototype with three ordered workspaces: Threads, Sound Desk and Visualiser. Threads now begins with one dynamic channel and supports adding/removing channels without a fixed five-channel ceiling. CH 01 owns the first audible sine test instance. Its oscillator, channel gain and analyser feed one shared application-level AudioContext/master output. Sound Desk and Visualiser continue to observe the same routing model; spatial coordinates do not yet alter sound.
+The application is a local RFE research-interface prototype with three ordered workspaces: Threads, Sound Desk and Visualiser. Threads programs dynamic isolated sine channels and their base levels. Place transfers an unplaced player into the construction canvas as one stable channel-bound output-only source node; it can then be explicitly wired to its matching Channel Out. The full player moves from the sidebar to Inspector while placed, preventing duplicate menu clutter. Disconnecting Channel Out smoothly silences only that channel while preserving its source and programmed state; reconnecting restores its prior trim. Sound Desk owns canonical X/Y placement and bounded relative Live Trim; X drives each channel's native stereo panner while Y remains acoustically neutral. Threads, Sound Desk and Visualiser share Play/Pause/Stop control of one session gate and elapsed timer. Monitor keeps selected-channel text context while rendering one composite waveform of every sounding routed channel, and reports `SD MUTED` rather than `NO SIGNAL` when the focused active route is muted at -100% in Sound Desk.
 
-The combined Milestone 06–07 batch has passed user listening/interaction acceptance. Do not infer permission to begin Milestone 08 or multi-channel audio until a new brief is supplied.
+Milestones 06–09 have passed user listening/interaction acceptance. Milestone 09 follows the explicit attached brief, is fully verified automatically, and was explicitly approved on 2026-08-12 as the new project baseline. Do not begin Milestone 10 without explicit instruction.
 
 2. APPROVED BASELINE
 
@@ -63,12 +64,13 @@ Application-level ownership:
 Channel-level ownership:
 - Oscillator/source.
 - Short source envelope.
-- Channel gain.
+- Programmed channel gain and bounded relative Live Trim gain.
 - Channel analyser.
+- Native stereo panner driven only by canonical X.
 - Channel parameters, status and scoped cleanup.
 
 Graph:
-`CHANNEL SOURCE -> SOURCE ENVELOPE -> CHANNEL GAIN -> CHANNEL ANALYSER -> SHARED MASTER -> DESTINATION`
+`CHANNEL SOURCE -> SOURCE ENVELOPE -> PROGRAMMED GAIN -> LIVE TRIM -> ANALYSER -> STEREO PANNER -> SHARED SESSION GATE -> SHARED MASTER -> DESTINATION`
 
 Lifecycle contracts:
 - Changing frequency or level never recreates the master, channel graph or oscillator.
@@ -80,7 +82,7 @@ Lifecycle contracts:
 - UI observer remount/navigation does not reconstruct the master graph.
 - Initialisation errors are visible and retryable without crashing unrelated workspaces.
 
-This isolation model is the required inheritance boundary for future CH 02, CH 03 and later concurrent instances. Additional audible channels are not implemented yet.
+This isolation model now supports CH 02, CH 03 and later dynamically created concurrent instances. The five-channel validation fixture is a test count, not a maximum.
 
 4. CURRENT ARCHITECTURE
 
@@ -89,7 +91,7 @@ This isolation model is the required inheritance boundary for future CH 02, CH 0
 - `app/channel-routing.ts`: channel definitions, terminal/source records, derived availability and terminal validation.
 - `app/spatial-routing.ts`: canonical spatial coordinates and channel-owned optional routing assignments.
 - `app/workspace-navigation.ts`: ordered workspace destinations and adjacent transition helpers.
-- `app/page.tsx`: application shell, Threads UI, Inputs & Channels, CH 01 controls, Monitor/analyser canvas, Sound Desk and Visualiser.
+- `app/page.tsx`: application shell, transferable per-channel sine controls/source nodes, contextual Monitor/analyser canvas, Sound Desk and Visualiser.
 - `app/globals.css`: studio/window layout, scroll-contained dynamic channel list, audio controls, waveform and responsive behavior.
 - `app/ui-config.ts` / `app/ui-workshop.tsx`: approved visual configuration and development-only tuning boundary.
 - `tests/audio-runtime.test.mjs`: fake-Web-Audio lifecycle/ownership/error tests.
@@ -102,9 +104,9 @@ This isolation model is the required inheritance boundary for future CH 02, CH 0
 
 Primary audio data flow:
 1. UI reads a subscribed snapshot from `applicationAudioRuntime`.
-2. Explicit Start creates/resumes shared infrastructure if required, then creates one CH 01 source.
-3. Parameter controls update only CH 01 AudioParams with smoothing.
-4. The analyser provides real time-domain samples to Monitor while active.
+2. Explicit Start creates/resumes shared infrastructure if required, then creates only the addressed channel source.
+3. Parameter controls update only the addressed channel AudioParams with smoothing.
+4. The focused channel's analyser provides real time-domain samples to Monitor while active.
 5. Stop removes the source and halts waveform rendering; shared infrastructure remains stable.
 6. Navigation remounts observers where appropriate but does not own or rebuild the audio engine.
 
@@ -122,7 +124,7 @@ Primary audio data flow:
 - `e2e/ui-quality-gate.spec.ts`: Milestone 06–07 browser acceptance and regression journeys.
 - `milestone_notes/milestone_06_threads_optimisation.txt` (new).
 - `milestone_notes/milestone_07_single_channel_audio.txt` (new).
-- `HANDOVER.txt`, `QUALITY_GATE.md`, `README.md`: repository truth advanced through Milestone 07.
+- `HANDOVER.txt`, `QUALITY_GATE.md`, `README.md`: repository truth advanced through Milestone 09.
 
 No application files were removed.
 
@@ -134,7 +136,7 @@ No application files were removed.
 - Audio is local/browser-native. No remote processing, cloud audio service or server-side audio dependency exists.
 - Conservative gain staging is intentional: channel maximum 0.2, shared master 0.8 and default level 20%.
 - There is no limiter/mastering chain. Start manual listening at conservative device volume.
-- Workspace navigation intentionally permits CH 01 to continue. Changing this policy requires an explicit product decision and lifecycle tests.
+- Workspace navigation intentionally permits active channels to continue. Changing this policy requires an explicit product decision and lifecycle tests.
 - Spatial routing and audio generation remain separate. Coordinates are retained data but do not pan or process sound.
 - Dynamic channel numbering is based on active channel state, not a permanent lifetime counter. Gaps below the current maximum are not reused while channels remain.
 - Channel list scrolling is internal to Inputs & Channels. Do not allow flex/grid shrink to clip fixture content or controls.
@@ -155,16 +157,16 @@ No application files were removed.
 - Preserve full-height, independently scrollable dynamic channel rows and reachable remove controls at large populations.
 - Removing a channel must remove only its own terminal/spatial/audio resources and retain peers.
 - Preserve reducer ownership, module/Thread distinction, connection validation and orphan cleanup.
-- Preserve canonical spatial coordinates and Sound Desk/Visualiser shared routing truth.
-- Do not add multi-channel audio, panning, spatial audio, distribution, effects, recording, file playback or simulation without an explicit milestone brief.
+- Preserve canonical spatial coordinates and Sound Desk/Visualiser shared routing truth. X alone drives pan; Y must remain acoustically neutral until explicitly scoped.
+- Do not add distance/depth/elevation audio, automatic distribution, effects, recording, file playback or simulation without an explicit milestone brief.
 - Maintain TypeScript, ESLint, production build, model/browser regression and axe gates.
 
 8. KNOWN LIMITATIONS / DEFERRED WORK
 
-- Only CH 01 is audible. Additional dynamic channels are routing/test-bed structures only.
+- Every dynamic channel can own an audible sine instance; five-channel concurrency is the current validated test fixture rather than a capacity limit.
 - Audible behavior depends on browser/device output. Automated tests prove lifecycle and analyser behavior, not human-perceived sound quality.
 - Short ramps reduce likely clicks but device-specific clicks/pops remain a listening concern for future work.
-- No stereo panning, X/Y audio mapping, HRTF, binaural/surround processing or distribution engine.
+- Basic X-to-stereo pan exists. There is no Y audio, distance/depth/elevation, HRTF, binaural/surround processing or automatic distribution engine.
 - No live input, recording, sample/file playback, loops, effects, EQ, compression or mastering protection.
 - No particle/field simulation or audio/visual gating.
 - Persistence remains browser-local; there is no durable project database/collaboration contract.
@@ -185,10 +187,10 @@ Run from the repository root with Node.js 22.13+ and pnpm 11.16.0:
    Expected: vinext production build succeeds.
 
 4. `node --experimental-strip-types --test tests/*.test.mjs`
-   Expected at handover: 34/34 Node tests pass.
+   Expected at handover: 44/44 Node tests pass.
 
 5. `pnpm exec playwright test`
-   Expected at handover: 10/10 Playwright tests pass, including axe.
+   Expected at handover: 13/13 Playwright tests pass, including axe.
 
 6. `pnpm run test:stress-ui`
    Expected: fixture validation and manual soak instructions.
@@ -197,21 +199,21 @@ Latest completed verification before repository reconciliation:
 - Typecheck: PASS
 - ESLint: PASS
 - Production build: PASS
-- Node tests: PASS, 34/34
-- Playwright/browser tests: PASS, 10/10
+- Node tests: PASS, 44/44
+- Playwright/browser tests: PASS, 13/13
 - axe serious/critical scan: PASS
-- User audible/interaction acceptance: PASS
+- Milestone 08 user audible/interaction acceptance: PASS
+- Milestone 09 user audible/interaction acceptance: PASS
 - Git diff integrity: PASS
 
 Manual audio confidence check:
 - Begin with conservative headphone/speaker volume.
-- Confirm initial SILENT / NO SIGNAL state.
-- Start CH 01 and confirm one clean tone plus real waveform.
-- Sweep the slider and use minus/plus for exact 1 Hz changes.
-- Change level conservatively and confirm predictable output.
-- Stop/restart repeatedly and confirm no duplicate tone or residual audio.
-- Navigate Threads -> Sound Desk -> Visualiser -> Threads while active and confirm one coherent continuing source.
-- Add many channels, scroll the channel list, remove arbitrary channels, then remove all; confirm the next channel is CH 01.
+- Distribute active recognisable channels across X -2 through +2 and confirm stereo separation/travel while peers remain stable.
+- Replot the same X across different Y positions and confirm Y is audibly neutral.
+- Exercise Live Trim +16, negative attenuation, mute and reset 0; confirm Threads programmed level never changes.
+- Exercise Visualiser Play/Pause/Resume/Stop/Play and confirm inactive sources remain inactive with no duplication or accumulated loudness.
+- Navigate Visualiser -> Sound Desk -> Threads while live-editing X/trim and confirm one coherent session.
+- Deliberately exercise rapid pan, trim, mute and transport transitions and listen for clicks, pops or transient spikes.
 
 10. ENVIRONMENT / DEPENDENCIES
 
@@ -229,22 +231,20 @@ Manual audio confidence check:
 
 11. NEXT INTENDED BATCH
 
-Milestones 08–09 require a fresh explicit brief. Their scope is not authorised by this handover. Likely future work may build on the isolated channel-instance model, but do not assume that this means immediately enabling multiple audible channels, spatial mapping, distribution, simulation or any other deferred feature.
+Milestone 09 is implementation-complete, user-approved, and authorized for commit and repository promotion as the new baseline. Do not begin Milestone 10 without explicit instruction.
 
-Before beginning Milestone 08:
-- Read this handover and both Milestone 06/07 notes completely.
-- Work from `/Users/requiredrequired/Documents/ChatGPT/Test Engine. Milestones 03-06` and confirm the clean local `agent/milestones-03-05` branch contains the approved Milestone 07 baseline.
-- Do not reset to the older remote Milestone 05 commit or push/reconcile the remote before the next explicitly approved end-of-day handover.
-- Run baseline verification appropriate to the new brief.
-- Preserve the application/channel audio ownership split.
-- Treat the Milestone 08–09 brief as the sole source of new implementation authority.
+Before any next milestone or publication:
+- Read this handover and the Milestone 06–09 notes completely.
+- Preserve the approved Milestone 09 baseline and verify repository state before further work.
+- Require explicit instruction for Milestone 10.
+- Preserve application/channel/session ownership, stable identity, fixed headroom, relative trim math, X-only pan, Y neutrality, and non-destructive transport.
 
 12. INSTRUCTIONS FOR THE NEXT CODING AGENT
 
 A new coding agent must:
-- Read `HANDOVER.txt`, `milestone_notes/milestone_06_threads_optimisation.txt` and `milestone_notes/milestone_07_single_channel_audio.txt` before editing.
+- Read `HANDOVER.txt` and the Milestone 06–09 notes before editing.
 - Inspect repository state rather than assuming this handover is perfectly current.
-- Work only within the explicitly supplied Milestone 08–09 scope.
+- Work only within the next explicitly supplied scope after user approval.
 - Preserve approved interaction, routing, audio isolation and cleanup contracts.
 - Prefer minimal targeted changes over broad refactoring.
 - Run verification in proportion to risk and report baseline failures before attempting broad repairs.
@@ -255,10 +255,13 @@ A new coding agent must:
 
 Milestone: 07 — Single-Channel Audible Signal Test (combined approved Milestones 06–07 batch)
 Status: COMPLETE — user-approved
-Previous approved commit: `29304875827e4cdc006765c898186ae0004853fa` (Milestone 05)
+Previous approved commit: `2bc63fc` (Milestones 06–07 handover boundary)
 Repository branch: `agent/milestones-03-05` after local fast-forward reconciliation
-Remote branch: intentionally still Milestone 05 at `29304875827e4cdc006765c898186ae0004853fa`; push deferred
-Verification: PASS — typecheck, lint, build, 34/34 Node tests, 10/10 Playwright tests, axe, user acceptance
-Audio model: one shared application runtime/master plus isolated CH 01 source/gain/analyser instance
-Next work: Milestones 08–09 only after a new explicit brief and fresh context
+Remote project branch: `milestone/ui-interaction-harness`, promoted to the Milestone 09 baseline
+Approved-baseline verification: PASS — typecheck, lint, build, 34/34 Node tests, 10/10 Playwright tests, axe, user acceptance
+Approved-baseline audio model: one shared application runtime/master plus isolated CH 01 source/gain/analyser instance
+Local development state: combined Milestones 08–09 implementation complete, user-approved, and promoted as the Milestone 09 baseline
+Local verification: PASS — typecheck, lint, build, 44/44 Node tests, 13/13 Playwright tests and axe
+Local audio model: independent source/envelope/programmed-gain/trim/analyser/panner branches -> one shared session gate/master
+Next work: only explicit Milestone 10 instruction
 Handover updated: 2026-08-12 (Europe/London)

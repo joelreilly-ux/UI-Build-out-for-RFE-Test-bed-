@@ -1,0 +1,115 @@
+# Milestone 08 — Multi-channel audio concurrency and instance isolation
+
+## Status and boundary
+
+Implementation, automated verification, and user listening/interaction acceptance are complete in the local Milestones 08–09 development batch. The user approved Milestone 08 on 2026-08-12 with “pass no notes” and reported that the test was flawless as far as they could tell. Milestone 08 is not committed, pushed, merged, published, or promoted independently. Milestone 09 has not begun.
+
+## Files modified
+
+- `app/audio-runtime.ts`
+- `app/page.tsx`
+- `tests/audio-runtime.test.mjs`
+- `e2e/ui-quality-gate.spec.ts`
+- `milestone_notes/milestone_08_multi_channel_audio.txt` (new)
+- `HANDOVER.txt`
+- `QUALITY_GATE.md`
+- `README.md`
+
+## Multi-channel audio architecture and ownership
+
+`ApplicationAudioRuntime` remains one module-level singleton. It lazily creates one AudioContext and one shared master gain. Every stable `ChannelId` owns an independent branch:
+
+`SINE SOURCE -> SOURCE ENVELOPE -> CHANNEL GAIN -> CHANNEL ANALYSER -> SHARED MASTER -> DEVICE`
+
+The AudioContext/master are application-owned. Oscillator, envelope, analyser, gain, frequency, level, active state, error state, and cleanup are channel-owned. Starting or disposing a channel never recreates or closes shared infrastructure. Only `shutdownApplication()` may close the AudioContext.
+
+The five-channel fixture is created through the existing dynamic reducer/UI path. No fixed collection of five audio objects exists and there is no five-channel maximum.
+
+## Identity, oscillator, and independent controls
+
+Runtime branches are held in a `Map<ChannelId, ChannelAudioInstance>`, never by UI index. Deleting CH 02 therefore cannot transfer CH 03 state when visible arrays close the gap. Replacement identities use the reducer's existing max-active-plus-one policy.
+
+Every channel gets the same sine-only controls and its own source lifecycle. Dynamic default frequencies use a formula based on stable numeric identity: CH 01–06 begin at 78, 110, 156, 221, 312, and 441 Hz. The formula is a recognisable test aid, not a fixed fixture or capacity limit. Frequency and level updates address only the keyed channel branch and never create a source.
+
+## Headroom and summing safety
+
+The existing conservative fixed-gain strategy remains appropriate for this test: maximum channel gain is 0.2, shared master gain is 0.8, and default channel level is 20%. Five phase-aligned channels at their maximum UI level have a theoretical peak sum of 0.8; at defaults the theoretical sum is 0.16. No limiter, compressor, effects, dynamic normalisation, or mastering chain was added. Fixed headroom also avoids changing already-running peers when another channel starts or stops.
+
+Listening must still begin at conservative device/headphone volume. Automated tests do not establish perceived loudness, clipping, or hearing safety.
+
+## Active deletion, synchronization, and resource cleanup
+
+The Remove Channel action disposes that exact runtime branch before reducer removal. `synchronizeChannels()` also reconciles runtime/configuration identities with `AppState.threadChannels`, so clear/reset/preset state replacement cannot leave a stale oscillator branch. Scoped disposal stops only that source, disconnects only that analyser/gain, clears only that channel configuration/error, and retains context/master and peers.
+
+Diagnostics now include context creations, active channel branches, channel creations/disposals, analyser creations/disposals, source creations/disposals, and active sources. Repeated unit/browser lifecycle tests use these counters to prove no unexpected master/source creation and correct branch cleanup.
+
+## Monitor and analyser strategy
+
+Monitor resolves the current stable channel from direct channel selection, the selected source module's channel terminal, or the first channel when nothing is selected. Its identity, frequency, level, active state, message, and waveform all come from that channel snapshot/analyser. Rapid selection changes only the observer target and never starts, stops, or reconstructs sources.
+
+Each active channel retains one lightweight analyser (`fftSize = 512`) as part of its isolated branch. Only the currently focused Monitor performs `requestAnimationFrame` waveform reads; hidden/unfocused channels have no user-facing render loop. The waveform remains real time-domain audio data, not decoration.
+
+## Navigation and spatial boundary
+
+Multiple sources intentionally continue through Threads -> Sound Desk -> Visualiser -> Threads. The browser test verifies context/master/channel/source creation counters and active-source count do not change across navigation. X/Y routing remains application state only. No pan, Y processing, spatial stage, Blend, module processing, recording, sample playback, or simulation work was introduced.
+
+## Automated tests and verification
+
+Added unit coverage proves:
+
+- recognisable dynamic defaults without five hard-coded instances;
+- five concurrent branches under one context/master;
+- frequency and level isolation;
+- scoped stop/restart with exactly one replacement source;
+- active deletion preserving peer identity/state and shared infrastructure;
+- replacement-channel creation without identity collision;
+- stale branch cleanup after reducer-level state synchronization;
+- analyser/channel/source lifecycle diagnostics.
+
+Added browser coverage builds five channels through Add Channel, starts all five, changes CH 03 frequency and CH 04 level, rapidly switches Monitor across all five, stops/restarts CH 03, deletes active CH 02, starts replacement CH 06, and navigates all workspaces while asserting stable diagnostics.
+
+Final results:
+
+- TypeScript: PASS
+- ESLint: PASS
+- Production vinext build: PASS
+- Node model/runtime tests: PASS, 38/38
+- Playwright browser tests: PASS, 11/11
+- axe serious/critical scan: PASS
+- Git diff integrity: PASS
+
+The first browser attempt could not bind localhost:3002 inside the restricted sandbox (`EPERM`). The same suite passed when rerun with approved local-server permission. This was an environment restriction, not a product failure.
+
+## Audible/manual checks and performance observations
+
+Codex cannot independently hear the user's output device. Automated real-browser checks exercised real Web Audio creation and analyser-backed UI; the user subsequently completed the interactive listening test and reported a pass with no notes. No clicks/pops, clipping, stuck tones, duplicate tones, control interference, or other audible/interaction issue was reported.
+
+Five channel rows remained responsive in the complete browser journey, Monitor switching did not allocate sources, and no browser crash, page error, severe UI delay, or resource-counter accumulation was observed. This is a basic five-channel observation, not formal CPU, memory, audio-underrun, or overload profiling.
+
+## Regressions discovered/fixed
+
+No approved functional regression was found in the final gate. The implementation removed the former CH 01-only UI/Monitor/waveform assumptions and added reducer-to-runtime cleanup so non-button channel resets cannot strand audio.
+
+## Current visual-wiring compatibility with future single-input / Blend semantics
+
+Channel output terminals already accept only one visual source connection. Ordinary module inputs can currently display more than one committed Thread because the prototype validator rejects duplicate source-target pairs but does not reserve an input after its first connection. No real audio graph is derived from those visual Threads in Milestone 08, so hidden summing was not introduced. Before processing modules become audible, module semantics must either enforce one resolved stream per ordinary input or route explicit two-input combinations through the future Blend module. Milestone 08 deliberately does not redesign the visual graph or implement Blend.
+
+## Known limitations and Milestone 09 concerns
+
+- Spatial coordinates are acoustically inert and every channel remains centred.
+- Fixed headroom is proven mathematically only for the five-channel fixture at current gain limits; this milestone is not an overload/capacity study.
+- Per-channel analysers are intentionally small, but larger populations should be measured before assuming negligible cost.
+- Browser/device-specific clicks, latency, clipping, and perceived loudness still require user listening.
+- Audio configuration remains runtime-local and is not part of durable project persistence.
+- Milestone 09 must add pan as a channel-owned stage before the shared master without changing context/master ownership or allowing Monitor/navigation to own sources.
+
+## Exact local/Git state
+
+- Worktree: `/Users/requiredrequired/Documents/ChatGPT/Test Engine. Milestones 03-06`
+- Branch: `agent/milestones-03-05`
+- HEAD before Milestone 08 edits: `2bc63fc` (`Clarify local handover boundary`)
+- Approved Milestone 07 commit: `3a3393d` (`Complete milestones 06-07`)
+- Remote remains Milestone 05 at `2930487`
+- Milestone 08: COMPLETE and user-approved; incorporated into the approved Milestone 09 baseline
+- Commit/merge/push/publication: not performed
+- Milestone 09: not started

@@ -47,6 +47,44 @@ test("terminal connectivity derives incomplete state and gates plotting eligibil
   assert.equal(isChannelRoutable(state, "channel-02"), true);
 });
 
+test("a channel sine player can be placed once, is identity-bound, and can complete only its matching Channel Out", () => {
+  let state = appReducer(createInitialState(), { type: "add-channel" });
+  state = appReducer(state, { type: "place-channel-source", channelId: "channel-02" });
+  const source = state.modules.find((module) => module.audioChannelId === "channel-02");
+  assert.ok(source);
+  assert.equal(source.type, "sine-source");
+  assert.deepEqual(source.ports, { input: false, output: true });
+
+  const once = state.modules.length;
+  state = appReducer(state, { type: "place-channel-source", channelId: "channel-02" });
+  assert.equal(state.modules.length, once);
+  state = appReducer(state, { type: "begin-connection", fromModuleId: source.id });
+  const wrongChannel = appReducer(state, { type: "commit-channel-output", channelId: "channel-01" });
+  assert.match(wrongChannel.statusMessage, /belongs to CH 02/);
+  assert.equal(wrongChannel.channelTerminalConnections.some((connection) => connection.fromModuleId === source.id), false);
+
+  state = appReducer(state, { type: "begin-connection", fromModuleId: source.id });
+  state = appReducer(state, { type: "commit-channel-output", channelId: "channel-02" });
+  assert.equal(getIncomingChannels(state).find((channel) => channel.id === "channel-02").status, "complete");
+});
+
+test("removing a placed source returns the channel to an unplaced/incomplete state and channel removal cleans its node", () => {
+  let state = appReducer(createInitialState(), { type: "add-channel" });
+  state = appReducer(state, { type: "place-channel-source", channelId: "channel-02" });
+  const source = state.modules.find((module) => module.audioChannelId === "channel-02");
+  assert.ok(source);
+  state = appReducer(state, { type: "begin-connection", fromModuleId: source.id });
+  state = appReducer(state, { type: "commit-channel-output", channelId: "channel-02" });
+  state = appReducer(state, { type: "select-module", id: source.id });
+  state = appReducer(state, { type: "delete-selection" });
+  assert.equal(state.modules.some((module) => module.audioChannelId === "channel-02"), false);
+  assert.equal(getIncomingChannels(state).find((channel) => channel.id === "channel-02").status, "incomplete");
+
+  state = appReducer(state, { type: "place-channel-source", channelId: "channel-02" });
+  state = appReducer(state, { type: "remove-channel", channelId: "channel-02" });
+  assert.equal(state.modules.some((module) => module.audioChannelId === "channel-02"), false);
+});
+
 test("removing one channel preserves peers and removes only its terminal and downstream route", () => {
   let threads = createInitialState();
   threads = appReducer(threads, { type: "add-channel" });

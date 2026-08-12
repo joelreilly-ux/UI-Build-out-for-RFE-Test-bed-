@@ -20,6 +20,7 @@ export type SpatialChannel = Readonly<{
   shortLabel: string;
   accentId: AccentId;
   assignment: SpatialCoordinate | null;
+  liveTrim: number;
 }>;
 
 export type SpatialRoutingState = Readonly<{
@@ -29,6 +30,7 @@ export type SpatialRoutingState = Readonly<{
 export type SpatialRoutingAction =
   | { type: "assign-channel"; channelId: string; coordinate: SpatialCoordinate }
   | { type: "unassign-channel"; channelId: string }
+  | { type: "set-live-trim"; channelId: string; value: number }
   | { type: "sync-channels"; channels: readonly ThreadChannel[] };
 
 export function coordinateKey(coordinate: SpatialCoordinate): string {
@@ -53,7 +55,7 @@ export function getChannelsAtCoordinate(state: SpatialRoutingState, coordinate: 
 
 export function createInitialSpatialRoutingState(channels: readonly ThreadChannel[] = [createChannelDefinition(1)]): SpatialRoutingState {
   return {
-    channels: channels.map((channel) => ({ ...channel, assignment: channel.id === "channel-01" ? getCoordinateByKey("0,0") : null })),
+    channels: channels.map((channel) => ({ ...channel, assignment: channel.id === "channel-01" ? getCoordinateByKey("0,0") : null, liveTrim: 0 })),
   };
 }
 
@@ -63,11 +65,16 @@ export function spatialRoutingReducer(state: SpatialRoutingState, action: Spatia
       channels: action.channels.map((channel) => ({
         ...channel,
         assignment: state.channels.find((existing) => existing.id === channel.id)?.assignment ?? null,
+        liveTrim: state.channels.find((existing) => existing.id === channel.id)?.liveTrim ?? 0,
       })),
     };
   }
   const channelExists = state.channels.some((channel) => channel.id === action.channelId);
   if (!channelExists) return state;
+  if (action.type === "set-live-trim") {
+    const liveTrim = Math.max(-100, Math.min(16, Math.round(action.value)));
+    return { channels: state.channels.map((channel) => channel.id === action.channelId ? { ...channel, liveTrim } : channel) };
+  }
   if (action.type === "assign-channel" && !isCanonicalCoordinate(action.coordinate)) return state;
   const assignment = action.type === "assign-channel" ? action.coordinate : null;
   return {

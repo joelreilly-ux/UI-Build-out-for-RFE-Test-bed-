@@ -1,6 +1,6 @@
-# RFE Milestone 07 quality gate
+# RFE Milestone 09 local quality gate
 
-The approved Milestones 06–07 batch is reconciled through the repository review branch documented in `HANDOVER.txt`.
+The combined Milestones 08–09 batch is implementation-complete, automatically verified, and user-approved as the Milestone 09 project baseline.
 
 ## Run locally
 
@@ -17,4 +17,6 @@ Open the repository on GitHub, choose **Actions**, then open **UI Quality Gate**
 
 Run `pnpm run test:stress-ui`, launch the app, choose **RFE_32x32_Benchmark** under **Preset**, and start the test session. For 10–15 minutes, move and select modules, edit controls, and inspect Threads. Confirm the timer advances normally, Diagnostics remain coherent at 32 modules / 32 Threads, controls remain responsive, Thread geometry follows movement, and no blank screen, lock-up, stale selection or visible error appears.
 
-The browser gate verifies directional navigation across Threads, Sound Desk and Visualiser, state retention, the shared session timer, dynamic channel terminals, a 24-channel scroll/removal case, empty-state channel-number reset, the canonical 5 × 5 Plotter workflow, Visualiser synchronization, CH 01 Web Audio lifecycle isolation, precise frequency controls, real Monitor state, reduced motion, and accessibility labels. Multi-channel audible output, spatial audio, mixing/distribution behavior and particle/simulation behavior remain outside the approved milestone.
+The browser gate verifies all retained navigation, routing, dynamic-channel, concurrency, Monitor, responsive, reduced-motion and accessibility behavior plus channel-bound sine source placement, menu-to-Inspector transfer, matching Channel Out wiring, smoothed disconnect-to-silence without source churn, node removal/restoration, one composite waveform of all sounding routed channels, explicit Threads `SD MUTED` status at -100% Sound Desk Live Trim, X-to-pan replotting, Y neutrality, relative Live Trim/mute/zero restoration, programmed-level separation, shared workspace transport paired to the elapsed timer, active/inactive preservation, smoothing diagnostics, and state retention across workspaces. Distance/depth/elevation audio, automatic distribution, Blend/processing semantics, arbitrary graph mixing and simulation remain outside Milestone 09.
+
+Automated Web Audio lifecycle and analyser checks do not independently prove stereo perception, loudness, clipping, clicks/pops, transient cleanliness, or output-device behavior. Milestone 09 listening and interaction acceptance was completed on 2026-08-12. Repeat the conservative-volume procedure in `milestone_notes/milestone_09_spatial_session.txt` after any future audio-graph change.

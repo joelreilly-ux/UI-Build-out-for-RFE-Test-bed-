@@ -122,11 +122,14 @@ test("restoration removes orphaned Threads and rejects duplicate module identity
 
 test("elapsed session time uses monotonic timestamps rather than accumulated ticks", () => {
   let state = createInitialState();
-  state = appReducer(state, { type: "toggle-session", now: 1_000 });
+  state = appReducer(state, { type: "play-session", now: 1_000 });
   assert.equal(getElapsedMs(state.session, 15_000), 14_000);
   assert.equal(formatElapsed(getElapsedMs(state.session, 15_000)), "00:00:14");
-  state = appReducer(state, { type: "toggle-session", now: 16_000 });
+  state = appReducer(state, { type: "pause-session", now: 16_000 });
   assert.equal(getElapsedMs(state.session, 30_000), 15_000);
-  state = appReducer(state, { type: "reset-session", now: 30_000 });
+  state = appReducer(state, { type: "play-session", now: 40_000 });
+  assert.equal(getElapsedMs(state.session, 45_000), 20_000);
+  state = appReducer(state, { type: "stop-session", now: 45_000 });
   assert.equal(getElapsedMs(state.session, 80_000), 0);
+  assert.equal(state.session.running, false);
 });

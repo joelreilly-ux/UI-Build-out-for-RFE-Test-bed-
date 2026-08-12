@@ -31,9 +31,14 @@ pnpm test
 - Selectable nodes with shared Inspector state
 - Editable timing and injection controls
 - Dynamic add/remove channel test-bed with scroll-contained large populations
-- One isolated CH 01 sine source with frequency, exact 1 Hz tuning, compact level and Start/Stop controls
-- Real analyser-derived Monitor waveform and active/silent state
-- Shared application audio output separated from channel-owned audio resources
+- Dynamic isolated sine sources with independent frequency, exact 1 Hz tuning, compact level and Start/Stop controls
+- Place transfers a sine player into Threads as one channel-bound output-only source node for explicit Channel Out wiring
+- Channel Out disconnection smoothly silences only that channel while preserving its source and programmed state
+- Sound Desk X-axis stereo placement and bounded relative Live Trim per plotted channel
+- Threads Monitor reports `SD MUTED` for a focused active route at -100% Live Trim instead of implying a missing signal
+- Shared Threads/Sound Desk/Visualiser Play/Pause/Stop transport paired to the elapsed session timer
+- Contextual Monitor readout with one analyser-derived composite waveform of every sounding routed channel
+- Shared session/master output separated from channel-owned audio resources
 - Session running/paused state and studio/compact layout switch
 - Responsive tablet and narrow-screen adaptations
 - Development-only UI Workshop with live token editing
@@ -45,7 +50,7 @@ pnpm test
 
 ## Milestone boundaries
 
-The approved baseline includes one real browser-native CH 01 sine test instance. It does not yet implement multiple concurrent audible channels, spatial audio, mixing/distribution, recording or sample playback. It also does not implement a simulation engine, durable persistence, advanced routing gestures, Focus sets, Favourites or Simulation Review.
+The approved repository baseline is Milestone 09. It includes verified multi-channel concurrency, channel-bound sine source placement/wiring, X-axis stereo placement, relative Live Trim, smoothed shared transport paired to the elapsed timer, composite sounding-channel Monitor waveform, and explicit Sound Desk mute status. Y audio, distance/depth/elevation, automatic distribution, Blend/processing semantics, arbitrary graph mixing, recording and sample playback remain unimplemented.
 
 ## Main editing surfaces
 
