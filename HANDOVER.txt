@@ -7,8 +7,8 @@ State:
 - Completed and user-approved batch: Milestones 06–09.
 - Current local development state: Milestone 09 is implemented, automatically verified, and user-approved for promotion as the new repository baseline.
 - Repository baseline: approved Milestone 09, containing the complete Milestones 06–09 progression.
-- Source branch: `agent/milestones-03-05`.
-- Project/default branch: `milestone/ui-interaction-harness`, promoted to the Milestone 09 baseline on 2026-08-12.
+- Source branch: `agent/milestone-09` at `2114d4a`.
+- Project/default branch: `milestone/ui-interaction-harness`, promoted to the Milestone 09 baseline by merge commit `5d5be82` on 2026-08-12.
 - Current development phase: the combined Milestones 08–09 batch is complete and approved. Milestone 10 has not begun.
 - Handover updated: 2026-08-12 (Europe/London).
 
@@ -256,8 +256,8 @@ A new coding agent must:
 Milestone: 07 — Single-Channel Audible Signal Test (combined approved Milestones 06–07 batch)
 Status: COMPLETE — user-approved
 Previous approved commit: `2bc63fc` (Milestones 06–07 handover boundary)
-Repository branch: `agent/milestones-03-05` after local fast-forward reconciliation
-Remote project branch: `milestone/ui-interaction-harness`, promoted to the Milestone 09 baseline
+Repository source branch: `agent/milestone-09`
+Remote project branch: `milestone/ui-interaction-harness`, Milestone 09 merge `5d5be82`
 Approved-baseline verification: PASS — typecheck, lint, build, 34/34 Node tests, 10/10 Playwright tests, axe, user acceptance
 Approved-baseline audio model: one shared application runtime/master plus isolated CH 01 source/gain/analyser instance
 Local development state: combined Milestones 08–09 implementation complete, user-approved, and promoted as the Milestone 09 baseline

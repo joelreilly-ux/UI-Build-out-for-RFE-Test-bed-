@@ -2,7 +2,8 @@ RFE PROTOTYPE TEST-BED — MILESTONE 09 REVIEW COPY
 
 Snapshot date: 2026-08-12 (Europe/London)
 Workspace: /Users/requiredrequired/Documents/ChatGPT/Test Engine. Milestones 03-06
-Branch: agent/milestones-03-05
+Source branch: agent/milestone-09 at 2114d4a
+Project/default branch promotion: milestone/ui-interaction-harness merge 5d5be82
 Pre-promotion HEAD: 2bc63fc
 Purpose: human-readable review snapshot; HANDOVER.txt remains the canonical handover.
 
