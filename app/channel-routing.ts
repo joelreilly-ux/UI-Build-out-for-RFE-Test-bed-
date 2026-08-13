@@ -2,12 +2,16 @@ import type { AccentId } from "./ui-config";
 
 export type ChannelId = `channel-${string}`;
 export type IncomingChannelStatus = "complete" | "incomplete";
+export type ChannelReplicationRole = "source" | "clone" | "duplicate";
 
 export type ChannelDefinition = Readonly<{
   id: ChannelId;
   label: string;
   shortLabel: string;
   accentId: AccentId;
+  role: ChannelReplicationRole;
+  sourceId: ChannelId;
+  duplicatedFrom: ChannelId | null;
 }>;
 
 export type ThreadChannel = ChannelDefinition;
@@ -30,15 +34,27 @@ export type IncomingChannel = ChannelDefinition & Readonly<{
 
 export const CHANNEL_ACCENT_IDS = ["coral", "stone", "moss", "utility-blue", "air-blue", "signal-red"] as const satisfies readonly AccentId[];
 
-export function createChannelDefinition(sequence: number): ChannelDefinition {
+export function createChannelDefinition(sequence: number, replication: Partial<Pick<ChannelDefinition, "role" | "sourceId" | "duplicatedFrom">> = {}): ChannelDefinition {
   const safeSequence = Math.max(1, Math.floor(sequence));
   const number = String(safeSequence).padStart(2, "0");
+  const id = `channel-${number}` as ChannelId;
   return {
-    id: `channel-${number}`,
+    id,
     label: `CH ${number}`,
     shortLabel: String(safeSequence),
     accentId: CHANNEL_ACCENT_IDS[(safeSequence - 1) % CHANNEL_ACCENT_IDS.length],
+    role: replication.role ?? "source",
+    sourceId: replication.sourceId ?? id,
+    duplicatedFrom: replication.duplicatedFrom ?? null,
   };
+}
+
+export function getSourceChannelId(channel: Pick<ThreadChannel, "id" | "sourceId">): ChannelId {
+  return channel.sourceId ?? channel.id;
+}
+
+export function getDependentClones(channels: readonly ThreadChannel[], sourceId: ChannelId): ThreadChannel[] {
+  return channels.filter((channel) => channel.role === "clone" && getSourceChannelId(channel) === sourceId);
 }
 
 export function getChannelDefinition(state: Pick<ChannelSourceState, "threadChannels">, channelId: string): ChannelDefinition | null {
@@ -47,7 +63,10 @@ export function getChannelDefinition(state: Pick<ChannelSourceState, "threadChan
 
 export function getIncomingChannels(state: ChannelSourceState): IncomingChannel[] {
   return state.threadChannels.map((definition) => {
-    const connection = state.channelTerminalConnections.find((item) => item.channelId === definition.id);
+    const boundSource = state.modules.find((module) => module.audioChannelId === definition.id);
+    const connection = boundSource
+      ? state.channelTerminalConnections.find((item) => item.fromModuleId === boundSource.id)
+      : state.channelTerminalConnections.find((item) => item.channelId === definition.id && !state.modules.find((module) => module.id === item.fromModuleId)?.audioChannelId);
     const source = connection ? state.modules.find((module) => module.id === connection.fromModuleId) : null;
     const complete = Boolean(source?.enabled && source.ports.output);
     return { ...definition, status: complete ? "complete" : "incomplete", sourceModuleId: complete ? source!.id : null };
@@ -63,7 +82,7 @@ export function canConnectChannelTerminal(state: ChannelSourceState, fromModuleI
   const channel = state.threadChannels.find((item) => item.id === channelId);
   if (!source || !channel) return { valid: false, reason: "Channel endpoint unavailable" };
   if (!source.enabled || !source.ports.output) return { valid: false, reason: "This module cannot feed a channel output" };
-  if (source.audioChannelId && source.audioChannelId !== channel.id) return { valid: false, reason: `This sine source belongs to ${source.audioChannelId.replace("channel-", "CH ")}` };
+  if (state.channelTerminalConnections.some((connection) => connection.fromModuleId === source.id)) return { valid: false, reason: "This source endpoint is already connected to a Channel Out" };
   if (state.channelTerminalConnections.some((connection) => connection.channelId === channelId)) return { valid: false, reason: "Channel output is already complete" };
-  return { valid: true, reason: "Valid channel output" };
+  return { valid: true, reason: "Valid free Channel Out" };
 }

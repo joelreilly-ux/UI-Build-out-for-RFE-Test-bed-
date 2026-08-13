@@ -38,6 +38,11 @@ test("server-renders the RFE structural shell", async () => {
   assert.match(html, /Increase CH 01 frequency by 1 Hz/);
   assert.match(html, /CH 01 level/);
   assert.match(html, /START SINE/);
+  assert.match(html, /DEVELOPMENT \/ COMMISSIONING RANGE/);
+  assert.match(html, /NOT A SAFETY LIMIT/);
+  assert.match(html, /MASTER SAFETY/);
+  assert.match(html, /dBFS/);
+  assert.doesNotMatch(html, /dB SPL|dBA|dBC|TRUE PEAK|dBTP/);
   assert.match(html, /ELAPSED/);
   assert.match(html, /shell-elapsed-readout/);
   assert.match(html, /aria-label="Session transport"/);
@@ -117,6 +122,7 @@ test("Sound Desk and Visualiser share the canonical spatial grid component", asy
   assert.match(channels, /CHANNEL_ACCENT_IDS = \["coral", "stone", "moss", "utility-blue", "air-blue", "signal-red"\]/);
   assert.match(source, /function ThreadChannelBands/);
   assert.match(source, /function ChannelOutputTerminals/);
+  assert.match(source, /channel-terminal-source-tag/);
   assert.match(source, /function ChannelRail/);
   assert.match(source, /function ChannelPlotter/);
   assert.match(source, /function WorkspaceTitlebar/);
@@ -131,4 +137,16 @@ test("Sound Desk and Visualiser share the canonical spatial grid component", asy
   assert.match(css, /channel-output-terminal[^}]*right:\s*28px/);
   assert.match(css, /channel-terminal-unlink[^}]*top:\s*2px; right:\s*2px/);
   assert.match(css, /spatial-grid-inspection[^}]*height:\s*auto;[^}]*aspect-ratio:\s*1/);
+});
+
+test("Clone Inspector exposes inherited source programming as locked readouts only", async () => {
+  const source = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  assert.match(source, /LOCKED — ADJUST AT SOURCE/);
+  assert.match(source, /Waveform, frequency and programmed level are inherited/);
+  assert.match(source, /POSITION \+ LIVE TRIM AT SOUND DESK/);
+  assert.match(source, /Quick Delete/);
+  const inspectorStart = source.indexOf("function SineSourceInspector");
+  const cloneBranch = source.slice(source.indexOf('if (channel.role === "clone")', inspectorStart), source.indexOf('return <div className="inspector-content sine-source-inspector">', inspectorStart));
+  assert.doesNotMatch(cloneBranch, /<SinePlayerControls/);
+  assert.doesNotMatch(cloneBranch, /setFrequency|setLevel/);
 });

@@ -98,6 +98,10 @@ export type AppAction =
   | { type: "remove-channel-output"; channelId: ChannelId }
   | { type: "add-channel" }
   | { type: "place-channel-source"; channelId: ChannelId }
+  | { type: "clone-source"; sourceChannelId: ChannelId }
+  | { type: "duplicate-source"; sourceChannelId: ChannelId }
+  | { type: "delete-endpoint"; channelId: ChannelId }
+  | { type: "delete-source-family"; sourceChannelId: ChannelId }
   | { type: "remove-channel"; channelId: ChannelId }
   | { type: "select-channel"; channelId: ChannelId }
   | { type: "cancel-connection" }
@@ -221,7 +225,7 @@ export function createInitialState(): AppState {
   };
 }
 
-function getNextChannelSequence(channels: readonly ThreadChannel[]): number {
+export function getNextChannelSequence(channels: readonly ThreadChannel[]): number {
   if (!channels.length) return 1;
   const activeSequences = channels
     .map((channel) => Number.parseInt(channel.id.replace("channel-", ""), 10))
@@ -441,11 +445,86 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         ports: { input: false, output: true },
         position: findSourcePlacement(state.modules, channelIndex),
       });
-      return withUpdate(state, { modules: [...state.modules, instance], selection: { kind: "module", id }, pendingConnectionFrom: null, statusMessage: `${channel.label} sine source placed — connect its output to ${channel.label} Channel Out` });
+      const legacyConnection = state.channelTerminalConnections.find((connection) => connection.channelId === channel.id && !state.modules.find((module) => module.id === connection.fromModuleId)?.audioChannelId);
+      const channelTerminalConnections = legacyConnection
+        ? state.channelTerminalConnections.map((connection) => connection.id === legacyConnection.id ? { ...connection, fromModuleId: id } : connection)
+        : state.channelTerminalConnections;
+      return withUpdate(state, { modules: [...state.modules, instance], channelTerminalConnections, selection: { kind: "module", id }, pendingConnectionFrom: null, statusMessage: legacyConnection ? `${channel.label} sine source placed and routed through ${channel.label} Channel Out` : `${channel.label} sine source placed — connect its output to any free Channel Out` });
+    }
+    case "clone-source": {
+      const sourceChannel = state.threadChannels.find((channel) => channel.id === action.sourceChannelId && channel.role !== "clone");
+      const sourceModule = state.modules.find((module) => module.type === "sine-source" && module.audioChannelId === sourceChannel?.id);
+      if (!sourceChannel || !sourceModule) return withUpdate(state, { statusMessage: "Place the source in Threads before cloning it" });
+      const sequence = getNextChannelSequence(state.threadChannels);
+      const channel = createChannelDefinition(sequence, { role: "clone", sourceId: sourceChannel.sourceId });
+      const id = `sine-clone-${channel.id}-${crypto.randomUUID()}`;
+      const instance = createModule(sineSourceDefinition, {
+        id,
+        title: `${channel.label} Clone`,
+        eyebrow: `Clone of ${sourceChannel.label}`,
+        audioChannelId: channel.id,
+        accentId: channel.accentId,
+        ports: { input: false, output: true },
+        position: findSourcePlacement(state.modules, state.threadChannels.length),
+      });
+      return withUpdate(state, { threadChannels: [...state.threadChannels, channel], modules: [...state.modules, instance], nextChannelSequence: sequence + 1, selection: { kind: "module", id }, pendingConnectionFrom: null, statusMessage: `${channel.label} cloned from ${sourceChannel.label} — connect its endpoint to any free Channel Out` });
+    }
+    case "duplicate-source": {
+      const origin = state.threadChannels.find((channel) => channel.id === action.sourceChannelId && channel.role !== "clone");
+      const sourceModule = state.modules.find((module) => module.type === "sine-source" && module.audioChannelId === origin?.id);
+      if (!origin || !sourceModule) return withUpdate(state, { statusMessage: "Place the source in Threads before duplicating it" });
+      const sequence = getNextChannelSequence(state.threadChannels);
+      const channel = createChannelDefinition(sequence, { role: "duplicate", duplicatedFrom: origin.id });
+      const id = `sine-source-${channel.id}-${crypto.randomUUID()}`;
+      const instance = createModule(sineSourceDefinition, {
+        id,
+        title: `${channel.label} Sine`,
+        eyebrow: `Duplicated from ${origin.label}`,
+        audioChannelId: channel.id,
+        accentId: channel.accentId,
+        ports: { input: false, output: true },
+        position: findSourcePlacement(state.modules, state.threadChannels.length),
+      });
+      return withUpdate(state, { threadChannels: [...state.threadChannels, channel], modules: [...state.modules, instance], nextChannelSequence: sequence + 1, selection: { kind: "module", id }, pendingConnectionFrom: null, statusMessage: `${channel.label} duplicated from ${origin.label} — independent source, connect to any free Channel Out` });
+    }
+    case "delete-endpoint": {
+      const channel = state.threadChannels.find((item) => item.id === action.channelId);
+      if (!channel || channel.role === "source") return state;
+      const removedIds = state.modules.filter((module) => module.audioChannelId === channel.id).map((module) => module.id);
+      const channels = state.threadChannels.filter((item) => item.id !== channel.id);
+      return withUpdate(state, {
+        modules: state.modules.filter((module) => !removedIds.includes(module.id)),
+        connections: state.connections.filter((connection) => !removedIds.includes(connection.fromModuleId) && !removedIds.includes(connection.toModuleId)),
+        threadChannels: channels,
+        channelTerminalConnections: state.channelTerminalConnections.filter((connection) => connection.channelId !== channel.id && !removedIds.includes(connection.fromModuleId)),
+        nextChannelSequence: getNextChannelSequence(channels),
+        selection: null,
+        pendingConnectionFrom: null,
+        statusMessage: channel.role === "clone" ? `${channel.label} Clone deleted` : `${channel.label} Duplicate deleted`,
+      });
+    }
+    case "delete-source-family": {
+      const source = state.threadChannels.find((channel) => channel.id === action.sourceChannelId && channel.role !== "clone");
+      if (!source) return state;
+      const familyIds = new Set(state.threadChannels.filter((channel) => channel.id === source.id || (channel.role === "clone" && channel.sourceId === source.id)).map((channel) => channel.id));
+      const removedIds = state.modules.filter((module) => module.audioChannelId && familyIds.has(module.audioChannelId)).map((module) => module.id);
+      const channels = state.threadChannels.filter((channel) => !familyIds.has(channel.id));
+      return withUpdate(state, {
+        modules: state.modules.filter((module) => !removedIds.includes(module.id)),
+        connections: state.connections.filter((connection) => !removedIds.includes(connection.fromModuleId) && !removedIds.includes(connection.toModuleId)),
+        threadChannels: channels,
+        channelTerminalConnections: state.channelTerminalConnections.filter((connection) => !familyIds.has(connection.channelId) && !removedIds.includes(connection.fromModuleId)),
+        nextChannelSequence: getNextChannelSequence(channels),
+        selection: null,
+        pendingConnectionFrom: null,
+        statusMessage: `${source.label} source and ${familyIds.size - 1} Clone path${familyIds.size === 2 ? "" : "s"} deleted`,
+      });
     }
     case "remove-channel": {
       const channel = state.threadChannels.find((item) => item.id === action.channelId);
       if (!channel) return state;
+      const dependentCloneCount = state.threadChannels.filter((item) => item.role === "clone" && item.sourceId === channel.id).length;
+      if (dependentCloneCount) return withUpdate(state, { statusMessage: `${channel.label} has ${dependentCloneCount} Clone path${dependentCloneCount === 1 ? "" : "s"} — confirm cascade deletion` });
       const threadChannels = state.threadChannels.filter((item) => item.id !== action.channelId);
       const removedSourceIds = state.modules.filter((module) => module.audioChannelId === action.channelId).map((module) => module.id);
       return withUpdate(state, {
@@ -465,6 +544,14 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       if (state.selection?.kind === "connection") return appReducer(state, { type: "remove-connection", id: state.selection.id });
       const ids = getSelectedModuleIds(state.selection);
       if (!ids.length) return state;
+      const selectedSource = state.modules.find((module) => ids.includes(module.id) && module.type === "sine-source" && module.audioChannelId);
+      if (selectedSource?.audioChannelId) {
+        const channel = state.threadChannels.find((item) => item.id === selectedSource.audioChannelId);
+        if (channel?.role === "clone") return appReducer(state, { type: "delete-endpoint", channelId: channel.id });
+        const cloneCount = state.threadChannels.filter((item) => item.role === "clone" && item.sourceId === channel?.id).length;
+        if (cloneCount) return withUpdate(state, { statusMessage: `${channel?.label ?? "Source"} has ${cloneCount} Clone path${cloneCount === 1 ? "" : "s"} — confirm cascade deletion in Inspector` });
+        if (channel?.role === "duplicate") return appReducer(state, { type: "delete-endpoint", channelId: channel.id });
+      }
       const removedThreads = state.connections.filter((connection) => ids.includes(connection.fromModuleId) || ids.includes(connection.toModuleId)).length;
       return withUpdate(state, { modules: state.modules.filter((module) => !ids.includes(module.id)), connections: state.connections.filter((connection) => !ids.includes(connection.fromModuleId) && !ids.includes(connection.toModuleId)), channelTerminalConnections: state.channelTerminalConnections.filter((connection) => !ids.includes(connection.fromModuleId)), selection: null, pendingConnectionFrom: null, statusMessage: `${ids.length} module${ids.length === 1 ? "" : "s"} deleted${removedThreads ? ` with ${removedThreads} attached Thread${removedThreads === 1 ? "" : "s"}` : ""}` });
     }
@@ -516,7 +603,8 @@ export function sanitizeRestoredState(value: unknown): AppState | null {
       const id = typeof channel?.id === "string" ? channel.id : legacyId;
       if (typeof id !== "string" || channels.findIndex((item) => (item as ThreadChannel & { channelId?: ChannelId })?.id === id || (item as ThreadChannel & { channelId?: ChannelId })?.channelId === id) !== index) return [];
       const sequence = Number.parseInt(id.replace("channel-", ""), 10);
-      return [typeof channel.label === "string" && typeof channel.shortLabel === "string" && typeof channel.accentId === "string" ? channel : createChannelDefinition(Number.isFinite(sequence) ? sequence : index + 1)];
+      const definition = typeof channel.label === "string" && typeof channel.shortLabel === "string" && typeof channel.accentId === "string" ? channel : createChannelDefinition(Number.isFinite(sequence) ? sequence : index + 1);
+      return [{ ...definition, role: definition.role ?? "source", sourceId: definition.sourceId ?? definition.id, duplicatedFrom: definition.duplicatedFrom ?? null }];
     })
     : defaultState.threadChannels;
   const channelIds = new Set(threadChannels.map((channel) => channel.id));

@@ -356,6 +356,7 @@ test("placing a sine player transfers it from the channel menu into Threads for 
   await page.getByRole("button", { name: "Go to Threads" }).click();
   await sourceNode.locator(".module-body").click();
   await page.getByRole("button", { name: "CH 02 start sine signal" }).click();
+  await expect(page.getByRole("button", { name: "CH 02 stop sine signal" })).toBeVisible();
   const beforeDisconnect = await page.evaluate(() => {
     const runtime = (window as typeof window & { __rfeAudioRuntime: { getChannelSnapshot(id: string): { active: boolean; routable: boolean; effectiveLevel: number }; getDiagnostics(): { sourceCreations: number; activeSources: number } } }).__rfeAudioRuntime;
     const snapshot = runtime.getChannelSnapshot("channel-02");
@@ -460,7 +461,13 @@ test("CH 01 audio keeps one shared master while source lifecycle remains channel
   await expect(monitor).toContainText("SINE");
   await expect(monitor).toContainText("156 Hz · LEVEL 10%");
   await expect(monitor).toContainText("ACTIVE · CENTRED OUTPUT");
-  await expect(page.getByLabel("Combined signal monitor active with 1 sounding channel")).toContainText("COMBINED SIGNAL · 1 CHANNEL");
+  await expect(page.getByLabel("Combined signal monitor active with 1 sounding channel")).toContainText("FINAL OUTPUT · 1 PATH");
+  await expect(page.getByLabel("Master safety meter")).toContainText("dBFS");
+  await expect(page.getByLabel("Master safety meter")).toContainText("NORMAL");
+  await expect.poll(() => page.evaluate(() => {
+    const safety = (window as typeof window & { __rfeAudioRuntime: { getMasterSafetySnapshot(): { available: boolean; currentPeakDbfs: number; state: string } } }).__rfeAudioRuntime.getMasterSafetySnapshot();
+    return safety.available && Number.isFinite(safety.currentPeakDbfs) && safety.state === "NORMAL";
+  })).toBe(true);
   await expect.poll(async () => (await diagnostics()).activeSources).toBe(1);
   expect(await diagnostics()).toMatchObject({ masterCreations: 1, channelCreations: 1, sourceCreations: 1, activeSources: 1 });
 
@@ -528,7 +535,7 @@ test("five dynamic sine channels remain isolated through control, deletion, Moni
     await expect(monitor).toContainText(`${label} / 05`);
     await expect(monitor).toContainText(`${frequency} Hz · LEVEL ${level}%`);
     // Only the default CH 01 is connected to Channel Out in this isolation fixture.
-    await expect(page.getByLabel("Combined signal monitor active with 1 sounding channel")).toContainText("COMBINED SIGNAL · 1 CHANNEL");
+    await expect(page.getByLabel("Combined signal monitor active with 1 sounding channel")).toContainText("FINAL OUTPUT · 1 PATH");
   }
   expect((await diagnostics()).sourceCreations).toBe(5);
 
@@ -650,4 +657,69 @@ test("approved shell has no serious or critical axe violations", async ({ page }
   const results = await new AxeBuilder({ page }).analyze();
   const blocking = results.violations.filter((violation) => violation.impact === "critical" || violation.impact === "serious");
   expect(blocking, blocking.map((violation) => `${violation.id}: ${violation.help}`).join("\n")).toEqual([]);
+});
+
+test("Clone Inspector keeps shared source programming read-only and follows root edits", async ({ page }) => {
+  await page.getByRole("button", { name: "Place CH 01 sine source in Threads" }).click();
+  await expect(page.getByText("Source actions", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Clone", exact: true }).click();
+
+  const inspector = page.getByLabel("Thread Inspector");
+  await expect(inspector.getByText("CLONE OF CH 01 · SHARED SOURCE")).toBeVisible();
+  await expect(inspector.getByText("LOCKED — ADJUST AT SOURCE")).toBeVisible();
+  await expect(inspector.getByLabel(/sine frequency/i)).toHaveCount(0);
+  await expect(inspector.getByLabel(/level/i)).toHaveCount(0);
+  const cloneNode = page.locator('[data-module-id^="sine-clone-channel-02"]');
+  await cloneNode.getByRole("button", { name: "Output port for CH 02 Clone" }).click();
+  await page.getByRole("button", { name: "CH 02 output terminal incomplete" }).click();
+  await expect(inspector.getByText("ROUTED", { exact: true })).toBeVisible();
+  await expect(page.locator('.channel-output-terminal[data-channel-id="channel-02"] .channel-terminal-source-tag')).toHaveText("CH 02 Clone");
+
+  await page.locator('[data-module-id^="sine-source-channel-01"] .module-body').click();
+  await page.getByLabel("CH 01 sine frequency").fill("70");
+  await page.getByRole("button", { name: "CH 01 start sine signal" }).click();
+  await expect.poll(() => page.evaluate(() => {
+    const runtime = (window as typeof window & { __rfeAudioRuntime: { getSoundingChannelIds(): string[] } }).__rfeAudioRuntime;
+    return runtime.getSoundingChannelIds().sort();
+  })).toEqual(["channel-01", "channel-02"]);
+  await page.locator('[data-module-id^="sine-clone-channel-02"] .module-body').click();
+  await expect(inspector.getByText("70 Hz", { exact: true })).toBeVisible();
+  await expect(inspector.getByText("LEVEL 20%", { exact: true })).toBeVisible();
+  await expect(inspector.getByText("POSITION + LIVE TRIM AT SOUND DESK", { exact: true })).toBeVisible();
+  await expect(inspector.getByRole("button", { name: "Quick Delete" })).toBeEnabled();
+
+  await page.locator('[data-module-id^="sine-source-channel-01"] .module-body').click();
+  await page.getByRole("button", { name: "Duplicate", exact: true }).click();
+  const duplicateNode = page.locator('[data-module-id^="sine-source-channel-03"]');
+  await duplicateNode.getByRole("button", { name: "Output port for CH 03 Sine" }).click();
+  await page.getByRole("button", { name: "CH 03 output terminal incomplete" }).click();
+  await page.getByRole("button", { name: "CH 03 start sine signal" }).click();
+  await expect.poll(() => page.evaluate(() => (window as typeof window & { __rfeAudioRuntime: { getSoundingChannelIds(): string[] } }).__rfeAudioRuntime.getSoundingChannelIds().sort())).toEqual(["channel-01", "channel-02", "channel-03"]);
+
+  await page.locator('[data-module-id^="sine-source-channel-01"] .module-body').click();
+  await page.getByRole("button", { name: "DELETE SOURCE…" }).click();
+  await expect(inspector.getByRole("alert")).toContainText("Unrelated sources keep playing");
+  await expect.poll(() => page.evaluate(() => (window as typeof window & { __rfeAudioRuntime: { getSoundingChannelIds(): string[]; getSessionPlaybackState(): string } }).__rfeAudioRuntime.getSoundingChannelIds().sort())).toEqual(["channel-01", "channel-02", "channel-03"]);
+  await page.getByRole("button", { name: "CANCEL" }).click();
+  await expect.poll(() => page.evaluate(() => (window as typeof window & { __rfeAudioRuntime: { getSoundingChannelIds(): string[] } }).__rfeAudioRuntime.getSoundingChannelIds().sort())).toEqual(["channel-01", "channel-02", "channel-03"]);
+
+  await page.getByRole("button", { name: "DELETE SOURCE…" }).click();
+  await page.getByRole("button", { name: "DELETE SOURCE + ALL CLONES" }).click();
+  await expect.poll(() => page.evaluate(() => (window as typeof window & { __rfeAudioRuntime: { getSoundingChannelIds(): string[] } }).__rfeAudioRuntime.getSoundingChannelIds())).toEqual(["channel-03"]);
+  await expect(duplicateNode).toBeVisible();
+});
+
+test("a source can mix and match with any free Channel Out", async ({ page }) => {
+  await page.getByRole("button", { name: "ADD CHANNEL" }).click();
+  await page.getByRole("button", { name: "Place CH 02 sine source in Threads" }).click();
+  await page.getByRole("button", { name: "Disconnect CH 01 output" }).click();
+  const source = page.locator('[data-module-id^="sine-source-channel-02"]');
+  await source.getByRole("button", { name: "Output port for CH 02 Sine" }).click();
+  await page.getByRole("button", { name: "CH 01 output terminal incomplete" }).click();
+  await expect(page.getByLabel("CH 01 output complete")).toBeVisible();
+  await expect(page.locator('.channel-output-terminal[data-channel-id="channel-01"] .channel-terminal-source-tag')).toHaveText("CH 02 Sine");
+
+  await page.getByRole("button", { name: "Go to Sound Desk" }).click();
+  await expect(page.getByRole("button", { name: "CH 02 · complete and routable" })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "CH 01 · incomplete" })).toBeDisabled();
 });

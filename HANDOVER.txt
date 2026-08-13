@@ -5,11 +5,11 @@ RFE PROTOTYPE TEST-BED — PROJECT HANDOVER
 State:
 - Current approved milestone: Milestone 09 — Spatial Session + Live Performance Control.
 - Completed and user-approved batch: Milestones 06–09.
-- Current local development state: Milestone 09 is implemented, automatically verified, and user-approved for promotion as the new repository baseline.
+- Current local development state: Milestone 10 is implemented only as an uncommitted local candidate under user testing; it is not approved or promoted.
 - Repository baseline: approved Milestone 09, containing the complete Milestones 06–09 progression.
 - Source branch: `agent/milestone-09` at `2114d4a`.
 - Project/default branch: `milestone/ui-interaction-harness`, promoted to the Milestone 09 baseline by merge commit `5d5be82` on 2026-08-12.
-- Current development phase: the combined Milestones 08–09 batch is complete and approved. Milestone 10 has not begun.
+- Current development phase: Milestone 10 manual acceptance and targeted feedback/bug-fix testing. Milestone 11 must not begin.
 - Handover updated: 2026-08-12 (Europe/London).
 
 The application is a local RFE research-interface prototype with three ordered workspaces: Threads, Sound Desk and Visualiser. Threads programs dynamic isolated sine channels and their base levels. Place transfers an unplaced player into the construction canvas as one stable channel-bound output-only source node; it can then be explicitly wired to its matching Channel Out. The full player moves from the sidebar to Inspector while placed, preventing duplicate menu clutter. Disconnecting Channel Out smoothly silences only that channel while preserving its source and programmed state; reconnecting restores its prior trim. Sound Desk owns canonical X/Y placement and bounded relative Live Trim; X drives each channel's native stereo panner while Y remains acoustically neutral. Threads, Sound Desk and Visualiser share Play/Pause/Stop control of one session gate and elapsed timer. Monitor keeps selected-channel text context while rendering one composite waveform of every sounding routed channel, and reports `SD MUTED` rather than `NO SIGNAL` when the focused active route is muted at -100% in Sound Desk.
@@ -231,12 +231,12 @@ Manual audio confidence check:
 
 11. NEXT INTENDED BATCH
 
-Milestone 09 is implementation-complete, user-approved, and authorized for commit and repository promotion as the new baseline. Do not begin Milestone 10 without explicit instruction.
+Milestone 10 is an unapproved local candidate under manual testing. Continue only user-directed M10 feedback and bug fixes. Do not promote M10 and do not begin Milestone 11 without explicit approval.
 
 Before any next milestone or publication:
 - Read this handover and the Milestone 06–09 notes completely.
 - Preserve the approved Milestone 09 baseline and verify repository state before further work.
-- Require explicit instruction for Milestone 10.
+- Preserve the local-only M10 candidate boundary and require explicit approval before promotion.
 - Preserve application/channel/session ownership, stable identity, fixed headroom, relative trim math, X-only pan, Y neutrality, and non-destructive transport.
 
 12. INSTRUCTIONS FOR THE NEXT CODING AGENT
@@ -244,7 +244,7 @@ Before any next milestone or publication:
 A new coding agent must:
 - Read `HANDOVER.txt` and the Milestone 06–09 notes before editing.
 - Inspect repository state rather than assuming this handover is perfectly current.
-- Work only within the next explicitly supplied scope after user approval.
+- Work only on explicitly supplied M10 testing feedback or bug fixes until M10 is approved.
 - Preserve approved interaction, routing, audio isolation and cleanup contracts.
 - Prefer minimal targeted changes over broad refactoring.
 - Run verification in proportion to risk and report baseline failures before attempting broad repairs.
@@ -263,5 +263,35 @@ Approved-baseline audio model: one shared application runtime/master plus isolat
 Local development state: combined Milestones 08–09 implementation complete, user-approved, and promoted as the Milestone 09 baseline
 Local verification: PASS — typecheck, lint, build, 44/44 Node tests, 13/13 Playwright tests and axe
 Local audio model: independent source/envelope/programmed-gain/trim/analyser/panner branches -> one shared session gate/master
-Next work: only explicit Milestone 10 instruction
+Next work: user testing and explicitly requested M10 feedback/bug fixes only; do not begin M11
 Handover updated: 2026-08-12 (Europe/London)
+MILESTONE 10 UPDATE — 2026-08-12
+
+Source replication now has two explicit ownership modes. Clone uses one shared oscillator/source signal with independent routed spatial/performance endpoints; Duplicate copies programming into a new independent source/channel identity. Clone source programming is read-only in Inspector and directs edits back to the root source. Root deletion is cascade-protected whenever dependent Clone paths exist. Clone families use equal-power endpoint normalisation to preserve master headroom. See milestone_notes/milestone_10_source_replication.txt for the implemented contract and verification boundary.
+
+Channel Out destinations are no longer locked to matching source numbers. A source endpoint such as CH 04 can connect to any free Channel Out, while a one-route-per-endpoint invariant prevents accidental fan-out outside the explicit Clone operation. Sound Desk routability follows the source endpoint identity rather than the destination slot number.
+
+END-OF-DAY LOCAL CANDIDATE BOUNDARY — 2026-08-12
+
+- APPROVED REPOSITORY BASELINE: Milestone 09 at `9af3b8d` on GitHub/default branch `milestone/ui-interaction-harness`.
+- LOCAL M10 WORKSPACE: `/Users/requiredrequired/Documents/ChatGPT/Test Engine. Milestones 03-06`.
+- LOCAL M10 BRANCH: `local/milestone-10-candidate`, created from `9af3b8d`; no remote branch and no M10 commit.
+- M10 STATUS: implemented locally, unapproved, and under user testing.
+- M10 PROMOTION: not permitted until explicit user approval.
+- EXPECTED NEXT WORK: manual testing and user-directed M10 feedback/bug fixes only.
+- M11 STATUS: do not begin.
+- LOCAL REVIEW URL: `http://localhost:3000/`.
+- RESUME COMMAND: from the local M10 workspace, run `pnpm run dev`; if the shell cannot find Node, prepend `/Users/requiredrequired/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin` and `/Users/requiredrequired/.cache/codex-runtimes/codex-primary-runtime/dependencies/bin/fallback` to `PATH`.
+- PRESERVATION: retain browser/local application state, dependencies, caches, generated development resources, and all uncommitted M10 files. Do not reset this workspace to M09 merely because GitHub remains on M09.
+
+MILESTONE 10.1 LOCAL SAFETY PATCH — 2026-08-13
+
+- STATUS: critical M10.1 output-safety work is implemented only in the local M10 candidate and remains unapproved/unpromoted.
+- ENGINE BOUNDARY: one shared AudioContext/session gate/master now feeds one authoritative AudioWorklet sample-safety processor, one post-protection analyser, then the sole device connection.
+- POLICY: limiting begins at -9 dBFS with 12:1 reduction, a deterministic -6 dBFS sample ceiling, 120 ms release, 1.5-second peak hold, and 30 Hz UI reports. These are configurable commissioning values, not physical safety guarantees.
+- METER: Threads Monitor reports measured post-protection sample peak/hold/reduction and NORMAL, CAUTION, LIMITING, OVERLOAD, or SAFETY MUTE. It never labels digital values SPL or true peak.
+- SAFETY MUTE: non-finite audio latches silence inside the worklet until explicit reset. Non-finite frequency/gain/trim/pan inputs retain valid engine state.
+- WAVEFORM: the Monitor oscilloscope now taps the final analyser after protection; it no longer normalises separate upstream channel traces into a visual composite.
+- COMMISSIONING RANGE: 50 Hz–10 kHz, explicitly labelled as a development/commissioning range and not a safety limit.
+- DOCUMENTS: see `SAFE_LISTENING_CHARTER.md` and `milestone_notes/milestone_10_1_output_safety.txt` for graph, rationale, fixtures, manual low-level acceptance and limitations.
+- NEXT WORK: independent review and conservative user acceptance of M10/M10.1 only. Do not promote and do not begin M11.

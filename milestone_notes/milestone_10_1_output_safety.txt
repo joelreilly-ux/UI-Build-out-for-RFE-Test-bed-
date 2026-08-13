@@ -1,0 +1,73 @@
+MILESTONE 10.1 — LOCAL CANDIDATE ENGINEERING RECORD
+
+STATUS
+
+M10.1 is part of the unapproved local M10 candidate. It is not promoted, published, or approved. Milestone 11 has not begun.
+
+COMMISSIONING RANGE
+
+The sine control range is 50 Hz–10 kHz and is labelled DEVELOPMENT / COMMISSIONING RANGE. It is not described as a safe-frequency range or speaker-protection boundary.
+
+AUDIO GRAPH AUDIT
+
+Before M10.1:
+source oscillator -> source envelope -> endpoint programmed gain -> endpoint Live Trim/routing gate -> endpoint analyser -> endpoint StereoPanner -> shared session gate/sum -> shared master gain -> AudioContext destination
+
+The channel analyser fed the old Monitor composite before panning, session transport, master gain, or final output. There was no independent final protection node.
+
+After M10.1:
+source oscillator -> source envelope -> endpoint programmed gain -> endpoint Live Trim/routing gate -> endpoint analyser -> endpoint StereoPanner -> shared session gate/sum -> shared master gain -> authoritative AudioWorklet safety processor -> final analyser/oscilloscope tap -> AudioContext destination
+
+The only device connection is final analyser -> AudioContext destination. All sources, Clones, Duplicates, workspaces, routing changes, and future upstream processing inherit the safety boundary through the shared session/master path.
+
+SAFETY PROCESSOR
+
+The small local AudioWorklet runs on the Web Audio rendering thread and does not depend on React, animation frames, workspace visibility, or network services. It measures each render block, applies immediate gain reduction above -9 dBFS with a 12:1 ratio, releases over 120 ms, and clamps final samples to a -6 dBFS ceiling. The ceiling is configurable in public/audio-safety-policy.js and is a conservative commissioning fence, not a loudness target or hardware guarantee.
+
+This is a deterministic SAMPLE-PEAK boundary. It is not oversampled and must not be called a true-peak/dBTP limiter. The native Web Audio compressor was not used as the sole safety claim because its specified compressor behaviour and reduction property do not establish a brick-wall or inter-sample ceiling. A future true-peak design requires validated reconstruction/oversampling.
+
+Non-finite input (NaN or Infinity) latches SAFETY MUTE inside the audio thread before output. Output stays zero until an explicit RESET SAFETY MUTE control message. Frequency, programmed level, Live Trim, pan, and internal ramp targets reject non-finite values and retain conservative valid state.
+
+METER AND OSCILLOSCOPE
+
+The AudioWorklet reports actual post-protection sample peak, 1.5-second peak hold, applied reduction, upstream input peak, safety state, and mute reason at 30 Hz. The UI subscribes to those throttled reports; it does not calculate protection or infer meter values from controls.
+
+The master meter measures the AudioWorklet output. The final analyser immediately after the worklet feeds the oscilloscope with actual post-protection PCM samples. The previous normalized visual composite has been removed. Channel analysers remain for channel-level engine inspection but no longer generate the master trace.
+
+CLONE FAN-OUT
+
+A Clone family still owns one oscillator. Its envelope feeds N endpoint branches. Each endpoint programmed gain is scaled by 1/sqrt(N), then receives independent routing, trim, analysis, and panning. Correlated endpoints can still reinforce after panning/summing, so the family normalisation reduces expected growth without pretending to eliminate all peaks. Adding/removing an endpoint recalculates remaining family gains. Every endpoint converges upstream of the one final safety processor. Duplicate creates an independent oscillator and follows the same master boundary.
+
+DETERMINISTIC FINDINGS
+
+- Meter calibration: amplitudes 1.0, 0.5, and 0.25 calculate as approximately 0, -6.0206, and -12.0412 dBFS; zero is negative infinity rather than NaN.
+- Identical 0.25-amplitude sines sum to approximately 0.5 / -6.0206 dBFS.
+- Near-frequency and separated-frequency fixtures preserve genuine sample summation and remain bounded at the output.
+- The digital-only 43/53/56 Hz fixture used three 0.08-amplitude tones. Its unprotected peak is approximately -12.4 dBFS and remains below the final ceiling. This does not establish what physically occurred in the room and is not exposed by the commissioning UI.
+- Known 1 kHz fixtures validate amplitude and a 48-sample period at 48 kHz.
+- Excessive amplitude is bounded to -6 dBFS; non-finite audio fails closed; rapid routing/transport/disposal does not create another context, master, safety node, or destination path.
+
+LIFECYCLE AND PORTABILITY
+
+There is one shared AudioContext, session gate, master, safety worklet, final analyser, and destination connection. They are application-owned and survive component remounts/navigation. Only application shutdown closes the worklet MessagePort, disconnects the final nodes, and closes the context. Worklet code and policy are local static assets, so source generation, routing, Clone/Duplicate processing, safety, metering, waveform, and transport have no remote runtime dependency. This preserves a clean UI/control -> audio engine -> safety boundary -> device separation for later desktop packaging without implementing packaging now.
+
+LOW-LEVEL MANUAL ACCEPTANCE
+
+Use conservative physical monitor gain. Do not attempt to force protection audibly.
+
+1. Start one normal-range sine; confirm the post-protection waveform, a changing dBFS meter, and NORMAL state.
+2. adjust programmed level modestly and confirm the measured sample peak follows.
+3. Add a small number of quiet routed sines and observe real summed movement.
+4. Add a Clone and observe the family-normalised, spatially summed output without expecting an N-times amplitude rule.
+5. Mute/disconnect endpoints and confirm their contribution disappears.
+6. Stop the session and confirm waveform silence/current peak returns to negative infinity after reports settle.
+7. Use automated digital fixtures—not loud speakers—to demonstrate LIMITING, OVERLOAD, ceiling enforcement, and SAFETY MUTE.
+
+KNOWN LIMITATIONS
+
+- Sample peak is not true peak; inter-sample peaks are not estimated.
+- Digital dBFS is not acoustic SPL and cannot account for interface, monitor, distance, or room gain.
+- A software ceiling cannot guarantee prevention of speaker or hearing damage.
+- AudioWorklet availability is required. Initialisation fails closed and leaves audio disconnected if the worklet cannot load.
+- Browser/device scheduling and DAC/driver behaviour remain outside Web Audio's digital graph.
+- Human listening is still required for subjective clicks, distortion, spatial behaviour, and device-specific performance, at conservative volume only.

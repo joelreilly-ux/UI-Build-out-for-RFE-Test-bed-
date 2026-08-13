@@ -52,6 +52,8 @@ pnpm test
 
 The approved repository baseline is Milestone 09. It includes verified multi-channel concurrency, channel-bound sine source placement/wiring, X-axis stereo placement, relative Live Trim, smoothed shared transport paired to the elapsed timer, composite sounding-channel Monitor waveform, and explicit Sound Desk mute status. Y audio, distance/depth/elevation, automatic distribution, Blend/processing semantics, arbitrary graph mixing, recording and sample playback remain unimplemented.
 
+The current local-only M10/M10.1 candidate adds Clone/Duplicate source semantics and a non-bypassable final sample-peak safety boundary. Its commissioning oscillator range is 50 Hz–10 kHz; this is not a safe-frequency claim. The compact Monitor reports measured post-protection sample peak in dBFS, peak hold, reduction and safety state. It does not report acoustic SPL or true peak. See `SAFE_LISTENING_CHARTER.md` and `milestone_notes/milestone_10_1_output_safety.txt`. This candidate is unapproved and must not be promoted until user acceptance.
+
 ## Main editing surfaces
 
 - `app/page.tsx` — data, reusable components, layout and local prototype state

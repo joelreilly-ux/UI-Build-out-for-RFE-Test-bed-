@@ -23,6 +23,17 @@ class FakeNode {
   disconnect() { this.disconnected = true; this.connections = []; }
 }
 
+class FakePort {
+  onmessage = null;
+  messages = [];
+  closed = false;
+  postMessage(message) { this.messages.push(message); }
+  close() { this.closed = true; }
+  emit(data) { this.onmessage?.({ data }); }
+}
+
+class FakeSafetyNode extends FakeNode { port = new FakePort(); }
+
 class FakeGain extends FakeNode { gain = new FakeParam(); }
 class FakeStereoPanner extends FakeNode { pan = new FakeParam(); }
 
@@ -62,12 +73,17 @@ class FakeContext {
 
 function harness() {
   const contexts = [];
+  const safetyNodes = [];
   const runtime = new ApplicationAudioRuntime(() => {
     const context = new FakeContext();
     contexts.push(context);
     return context;
+  }, async () => {
+    const node = new FakeSafetyNode();
+    safetyNodes.push(node);
+    return node;
   });
-  return { runtime, contexts };
+  return { runtime, contexts, safetyNodes };
 }
 
 test("audio parameters can be prepared without creating application audio infrastructure", () => {
@@ -85,6 +101,54 @@ test("dynamic channel identities receive recognisable defaults without a fixed f
     [1, 2, 3, 4, 5, 6].map((sequence) => getDefaultChannelFrequency(`channel-${String(sequence).padStart(2, "0")}`)),
     [78, 110, 156, 221, 312, 441],
   );
+});
+
+test("Clone endpoints share one oscillator and inherited programming while retaining independent endpoint controls", async () => {
+  const { runtime, contexts } = harness();
+  runtime.synchronizeTopology([
+    { id: "channel-01", sourceId: "channel-01" },
+    { id: "channel-02", sourceId: "channel-01" },
+    { id: "channel-03", sourceId: "channel-01" },
+  ]);
+  runtime.setSpatialX("channel-01", -2);
+  runtime.setSpatialX("channel-02", 2);
+  runtime.setLiveTrim("channel-02", -50);
+  await runtime.startChannel("channel-01");
+
+  assert.equal(contexts[0].oscillators.length, 1);
+  assert.equal(runtime.getDiagnostics().sourceCreations, 1);
+  const familyGainValues = contexts[0].oscillators[0].connections[0].connections.map((gain) => gain.gain.value);
+  assert.equal(familyGainValues.every((value) => Math.abs(value - (0.2 * 0.2 / Math.sqrt(3))) < 0.000001), true);
+  assert.deepEqual(runtime.getActiveChannelIds(), ["channel-01", "channel-02", "channel-03"]);
+  runtime.setFrequency("channel-01", 155);
+  runtime.setLevel("channel-01", 24);
+  assert.deepEqual(["channel-01", "channel-02", "channel-03"].map((id) => [runtime.getChannelSnapshot(id).frequency, runtime.getChannelSnapshot(id).level]), [[155, 24], [155, 24], [155, 24]]);
+  assert.equal(runtime.getChannelSnapshot("channel-01").pan, -1);
+  assert.equal(runtime.getChannelSnapshot("channel-02").pan, 1);
+  assert.equal(runtime.getChannelSnapshot("channel-02").liveTrim, -50);
+
+  runtime.disposeChannel("channel-02");
+  assert.equal(runtime.getChannelSnapshot("channel-01").active, true);
+  assert.equal(runtime.getChannelSnapshot("channel-03").active, true);
+  assert.equal(runtime.getDiagnostics().activeSources, 1);
+});
+
+test("Duplicate sources copy programming once then own independent oscillator state", async () => {
+  const { runtime, contexts } = harness();
+  runtime.synchronizeTopology([
+    { id: "channel-01", sourceId: "channel-01" },
+    { id: "channel-02", sourceId: "channel-02" },
+  ]);
+  runtime.setFrequency("channel-01", 55);
+  runtime.setLevel("channel-01", 20);
+  runtime.copyProgramming("channel-01", "channel-02");
+  await runtime.startChannel("channel-01");
+  await runtime.startChannel("channel-02");
+  assert.equal(contexts[0].oscillators.length, 2);
+  runtime.setFrequency("channel-01", 70);
+  runtime.setLevel("channel-02", 12);
+  assert.deepEqual([runtime.getChannelSnapshot("channel-01").frequency, runtime.getChannelSnapshot("channel-02").frequency], [70, 55]);
+  assert.deepEqual([runtime.getChannelSnapshot("channel-01").level, runtime.getChannelSnapshot("channel-02").level], [20, 12]);
 });
 
 test("five channels coexist through one context and master with isolated parameters and source lifecycles", async () => {
@@ -110,13 +174,17 @@ test("five channels coexist through one context and master with isolated paramet
     sourceCreations: 5,
     sourceDisposals: 0,
     activeSources: 5,
+    safetyCreations: 1,
+    safetyDisposals: 0,
+    finalAnalyserCreations: 1,
+    finalAnalyserDisposals: 0,
   });
   assert.deepEqual(channelIds.map((channelId) => runtime.getChannelSnapshot(channelId).frequency), [78, 110, 156, 221, 312]);
   assert.equal(contexts[0].oscillators[0].connections[0], contexts[0].gains[4]);
   assert.equal(contexts[0].gains[4].connections[0], contexts[0].gains[2]);
   assert.equal(contexts[0].gains[2].connections[0], contexts[0].gains[3]);
-  assert.equal(contexts[0].gains[3].connections[0], contexts[0].analysers[0]);
-  assert.equal(contexts[0].analysers[0].connections[0], contexts[0].panners[0]);
+  assert.equal(contexts[0].gains[3].connections[0], contexts[0].analysers[1]);
+  assert.equal(contexts[0].analysers[1].connections[0], contexts[0].panners[0]);
   assert.equal(contexts[0].panners[0].connections[0], contexts[0].gains[1]);
   assert.equal(contexts[0].gains[1].connections[0], contexts[0].gains[0]);
 
@@ -336,6 +404,105 @@ test("only explicit application shutdown closes shared infrastructure", async ()
   assert.equal(runtime.getDiagnostics().activeSources, 0);
 });
 
+test("every audible branch crosses one non-bypassable safety node and final analyser", async () => {
+  const { runtime, contexts, safetyNodes } = harness();
+  runtime.synchronizeTopology([
+    { id: "channel-01", sourceId: "channel-01" },
+    { id: "channel-02", sourceId: "channel-01" },
+    { id: "channel-03", sourceId: "channel-03" },
+  ]);
+  await runtime.startChannel("channel-01");
+  await runtime.startChannel("channel-03");
+  const context = contexts[0];
+  const finalAnalyser = context.analysers[0];
+  assert.equal(safetyNodes.length, 1);
+  assert.deepEqual(context.destination.connections, []);
+  assert.equal(finalAnalyser.connections[0], context.destination);
+  assert.equal(safetyNodes[0].connections[0], finalAnalyser);
+  assert.equal(runtime.getDiagnostics().safetyCreations, 1);
+  assert.equal(runtime.getDiagnostics().finalAnalyserCreations, 1);
+  assert.equal(runtime.getDiagnostics().contextCreations, 1);
+  assert.equal(runtime.getDiagnostics().masterCreations, 1);
+  assert.equal(context.panners.every((panner) => panner.connections.length === 1 && panner.connections[0] === context.gains[1]), true);
+});
+
+test("master safety reports are measured engine state and safety mute recovery is deliberate", async () => {
+  const { runtime, safetyNodes } = harness();
+  await runtime.startChannel("channel-01");
+  let channelNotifications = 0;
+  let meterNotifications = 0;
+  const unsubscribeChannel = runtime.subscribe(() => { channelNotifications += 1; });
+  const unsubscribeMeter = runtime.subscribeMasterSafety(() => { meterNotifications += 1; });
+  safetyNodes[0].port.emit({
+    type: "safety-meter",
+    currentPeakDbfs: -8.4,
+    peakHoldDbfs: -7.1,
+    reductionDb: -1.2,
+    inputPeakDbfs: -4.2,
+    state: "LIMITING",
+    muteReason: "",
+  });
+  assert.equal(channelNotifications, 0);
+  assert.equal(meterNotifications, 1);
+  assert.deepEqual(runtime.getMasterSafetySnapshot(), {
+    currentPeakDbfs: -8.4,
+    peakHoldDbfs: -7.1,
+    reductionDb: -1.2,
+    inputPeakDbfs: -4.2,
+    state: "LIMITING",
+    muteReason: "",
+    available: true,
+    meterRateHz: 30,
+  });
+  safetyNodes[0].port.emit({ type: "safety-meter", currentPeakDbfs: -Infinity, peakHoldDbfs: -7.1, reductionDb: -Infinity, inputPeakDbfs: -Infinity, state: "SAFETY MUTE", muteReason: "NON-FINITE AUDIO SAMPLE" });
+  assert.equal(runtime.getMasterSafetySnapshot().state, "SAFETY MUTE");
+  runtime.resetSafetyMute();
+  assert.deepEqual(safetyNodes[0].port.messages.at(-1), { type: "reset-safety-mute" });
+  assert.equal(runtime.getMasterSafetySnapshot().state, "NORMAL");
+  unsubscribeChannel();
+  unsubscribeMeter();
+});
+
+test("invalid parameter values never reach safety-critical AudioParams", async () => {
+  const { runtime, contexts } = harness();
+  await runtime.startChannel("channel-01");
+  const before = runtime.getChannelSnapshot("channel-01");
+  runtime.setFrequency("channel-01", Number.NaN);
+  runtime.setFrequency("channel-01", "72");
+  runtime.setFrequency("channel-01", undefined);
+  runtime.setLevel("channel-01", Number.POSITIVE_INFINITY);
+  runtime.setLevel("channel-01", null);
+  runtime.setLiveTrim("channel-01", Number.NEGATIVE_INFINITY);
+  runtime.setSpatialX("channel-01", Number.NaN);
+  const after = runtime.getChannelSnapshot("channel-01");
+  assert.equal(after.frequency, before.frequency);
+  assert.equal(after.level, before.level);
+  assert.equal(after.liveTrim, before.liveTrim);
+  assert.equal(after.pan, 0);
+  for (const gain of contexts[0].gains) assert.equal(Number.isFinite(gain.gain.value), true);
+  for (const panner of contexts[0].panners) assert.equal(Number.isFinite(panner.pan.value), true);
+  for (const oscillator of contexts[0].oscillators) assert.equal(Number.isFinite(oscillator.frequency.value), true);
+});
+
+test("rapid route, transport, and disposal churn never creates parallel safety paths", async () => {
+  const { runtime, contexts, safetyNodes } = harness();
+  await runtime.startChannel("channel-01");
+  for (let index = 0; index < 30; index += 1) {
+    runtime.setChannelRoutable("channel-01", index % 2 === 0);
+    runtime.pauseSession();
+    runtime.playSession();
+  }
+  runtime.stopSession();
+  runtime.playSession();
+  runtime.disposeChannel("channel-01");
+  await runtime.startChannel("channel-01");
+  assert.equal(contexts.length, 1);
+  assert.equal(safetyNodes.length, 1);
+  assert.equal(runtime.getDiagnostics().safetyCreations, 1);
+  assert.equal(runtime.getDiagnostics().masterCreations, 1);
+  assert.equal(runtime.getDiagnostics().contextCreations, 1);
+});
+
 test("initialisation failure is visible and retryable without affecting unrelated state", async () => {
   let attempts = 0;
   const context = new FakeContext();
@@ -343,7 +510,7 @@ test("initialisation failure is visible and retryable without affecting unrelate
     attempts += 1;
     if (attempts === 1) throw new Error("Audio device unavailable");
     return context;
-  });
+  }, async () => new FakeSafetyNode());
   await runtime.startChannel("channel-01");
   assert.deepEqual(runtime.getChannelSnapshot("channel-01"), {
     channelId: "channel-01", frequency: AUDIO_DEFAULT_FREQUENCY, level: AUDIO_DEFAULT_LEVEL, liveTrim: 0, effectiveLevel: AUDIO_DEFAULT_LEVEL, pan: 0, routable: true, active: false, availability: "error", message: "Audio device unavailable",

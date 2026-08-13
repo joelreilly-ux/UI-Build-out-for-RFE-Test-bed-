@@ -84,6 +84,11 @@ function useAudioRuntimeRevision() {
   useEffect(() => applicationAudioRuntime.subscribe(() => setRevision((value) => value + 1)), []);
 }
 
+function useMasterSafetyRevision() {
+  const [, setRevision] = useState(0);
+  useEffect(() => applicationAudioRuntime.subscribeMasterSafety(() => setRevision((value) => value + 1)), []);
+}
+
 function useAudioChannel(channelId: ChannelId | null) {
   useAudioRuntimeRevision();
   return channelId ? applicationAudioRuntime.getChannelSnapshot(channelId) : null;
@@ -472,8 +477,11 @@ function ChannelOutputTerminals({ state, dispatch }: { state: AppState; dispatch
   return <div className="channel-output-terminals" aria-label="Thread channel output terminals">
     {incoming.map((channel, index) => {
       const accent = MUTED_ACCENTS.find((item) => item.id === channel.accentId);
-      const complete = channel.status === "complete";
-      return <div className={`channel-output-terminal ${complete ? "complete" : "incomplete"}`} data-channel-id={channel.id} key={channel.id} style={{ top: `${(index + .5) / Math.max(1, incoming.length) * 100}%`, "--channel-color": accent?.value } as CSSProperties} aria-label={`${channel.label} output ${complete ? "complete" : "incomplete"}`}>
+      const connection = state.channelTerminalConnections.find((item) => item.channelId === channel.id);
+      const sourceModule = connection ? state.modules.find((module) => module.id === connection.fromModuleId) : null;
+      const complete = Boolean(connection);
+      return <div className={`channel-output-terminal ${complete ? "complete" : "incomplete"}`} data-channel-id={channel.id} key={channel.id} style={{ top: `${(index + .5) / Math.max(1, incoming.length) * 100}%`, "--channel-color": accent?.value } as CSSProperties} aria-label={`${channel.label} output ${complete ? `complete · ${sourceModule?.title ?? "source connected"}` : "incomplete"}`}>
+        {sourceModule && <span className="channel-terminal-source-tag" title={`${channel.label} receives ${sourceModule.title}`}>{sourceModule.title}</span>}
         <button className="channel-terminal-input" aria-disabled={complete || !state.pendingConnectionFrom} aria-label={`${channel.label} output terminal ${complete ? "complete" : "incomplete"}`} onClick={(event) => {
           event.stopPropagation();
           if (!complete && state.pendingConnectionFrom) dispatch({ type: "commit-channel-output", channelId: channel.id });
@@ -532,7 +540,7 @@ function Inspector({ state, selectedModule, selectedModules, selectedConnection,
     <details className="inspector-section"><summary>Batch actions</summary><p className="inspector-note">Drag any selected module to move the whole group. Shift-click toggles membership.</p><div className="lifecycle-actions"><button onClick={() => dispatch({ type: "duplicate-selection" })}>Duplicate batch</button><button className="danger" onClick={() => dispatch({ type: "delete-selection" })}>Delete batch</button></div></details>
   </div>;
   if (!selectedModule) return <div className="inspector-content empty-inspector">Select a module or Thread.</div>;
-  if (selectedModule.type === "sine-source" && selectedModule.audioChannelId) return <SineSourceInspector module={selectedModule} dispatch={dispatch} />;
+  if (selectedModule.type === "sine-source" && selectedModule.audioChannelId) return <SineSourceInspector state={state} module={selectedModule} dispatch={dispatch} />;
   const disabled = !selectedModule.enabled;
   const p = selectedModule.parameters;
   return <div className="inspector-content">
@@ -577,7 +585,7 @@ function InputsAndChannels({ state, collapsed, onToggle, dispatch }: {
       <button className="add-channel-action" onClick={() => dispatch({ type: "add-channel" })}>＋ ADD CHANNEL</button>
       <div className="input-channel-list" aria-label={`${incoming.length} active channel${incoming.length === 1 ? "" : "s"}`}>
         {incoming.map((channel) => <div className={`input-channel-fixture ${state.selection?.kind === "channel" && state.selection.id === channel.id ? "selected" : ""}`} key={channel.id} data-channel-id={channel.id}>
-          <ChannelAudioControls channel={channel} selected={state.selection?.kind === "channel" && state.selection.id === channel.id} sourcePlaced={state.modules.some((module) => module.type === "sine-source" && module.audioChannelId === channel.id)} dispatch={dispatch} />
+          <ChannelAudioControls channel={channel} selected={state.selection?.kind === "channel" && state.selection.id === channel.id} sourceModuleId={state.modules.find((module) => module.type === "sine-source" && module.audioChannelId === channel.id)?.id ?? null} sourcePlaced={state.modules.some((module) => module.type === "sine-source" && module.audioChannelId === channel.id)} cloneCount={state.threadChannels.filter((item) => item.role === "clone" && item.sourceId === channel.id).length} dispatch={dispatch} />
         </div>)}
       </div>
       <div className="future-inputs" aria-label="Future source types reserved"><span>SOURCES</span><p>Import File · Mic / Live · Capture / Loop · Saved Sources</p><small>Reserved for a future milestone</small></div>
@@ -585,17 +593,35 @@ function InputsAndChannels({ state, collapsed, onToggle, dispatch }: {
   </aside>;
 }
 
-function ChannelAudioControls({ channel, selected, sourcePlaced, dispatch }: {
+function ChannelAudioControls({ channel, selected, sourceModuleId, sourcePlaced, cloneCount, dispatch }: {
   channel: IncomingChannel;
   selected: boolean;
+  sourceModuleId: string | null;
   sourcePlaced: boolean;
+  cloneCount: number;
   dispatch: React.Dispatch<Parameters<typeof appReducer>[1]>;
 }) {
   const audio = useAudioChannel(channel.id)!;
+  const removeChannel = () => {
+    if (channel.role === "clone") {
+      applicationAudioRuntime.disposeChannel(channel.id);
+      dispatch({ type: "delete-endpoint", channelId: channel.id });
+      return;
+    }
+    if (cloneCount) {
+      if (sourceModuleId) dispatch({ type: "select-module", id: sourceModuleId });
+      dispatch({ type: "set-status", value: `${channel.label} has linked Clone paths — confirm deletion in Inspector` });
+      return;
+    }
+    if (window.confirm(`Remove ${channel.label} and its downstream route?`)) {
+      applicationAudioRuntime.disposeSource(channel.id);
+      dispatch({ type: "remove-channel", channelId: channel.id });
+    }
+  };
   return <>
     <div className="input-channel-row">
       <button className="channel-select" onClick={() => dispatch({ type: "select-channel", channelId: channel.id })} aria-pressed={selected}><span>{channel.label}</span><small>{audio.active ? "SINE · ACTIVE" : "SINE · SILENT"}</small></button>
-      <button className="channel-remove" aria-label={`Remove ${channel.label}`} onClick={() => { if (window.confirm(`Remove ${channel.label} and its downstream route?`)) { applicationAudioRuntime.disposeChannel(channel.id); dispatch({ type: "remove-channel", channelId: channel.id }); } }}>×</button>
+      <button className="channel-remove" aria-label={`Remove ${channel.label}`} onClick={removeChannel}>×</button>
     </div>
     {!sourcePlaced && <SinePlayerControls channelId={channel.id} label={channel.label} audio={audio} onPlace={() => dispatch({ type: "place-channel-source", channelId: channel.id })} onToggle={() => dispatch({ type: "select-channel", channelId: channel.id })} />}
   </>;
@@ -608,11 +634,13 @@ function SinePlayerControls({ channelId, label, audio, onPlace, onToggle }: {
   onPlace?: () => void;
   onToggle?: () => void;
 }) {
+  const signalState = audio.active ? audio.routable ? "ACTIVE" : "ACTIVE · UNROUTED" : audio.availability === "error" ? "ERROR" : "SILENT";
   return <div className="audio-test-controls" aria-label={`${label} sine signal controls`}>
-      <div className="audio-state-line" role="status"><span className={audio.active ? "active" : "silent"} /> <b>{audio.active ? "ACTIVE" : audio.availability === "error" ? "ERROR" : "SILENT"}</b><small>{audio.message}</small></div>
+      <div className="audio-state-line" role="status"><span className={audio.active && audio.routable ? "active" : "silent"} /> <b>{signalState}</b><small>{audio.active && !audio.routable ? "Connect to any free Channel Out" : audio.message}</small></div>
       <div className="frequency-control">
         <div className="frequency-heading"><span>FREQUENCY</span><output aria-live="polite">{audio.frequency} Hz</output></div>
         <input aria-label={`${label} sine frequency`} type="range" min={AUDIO_FREQUENCY_MIN} max={AUDIO_FREQUENCY_MAX} step="1" value={audio.frequency} onChange={(event) => applicationAudioRuntime.setFrequency(channelId, Number(event.target.value))} />
+        <small className="commissioning-range">DEVELOPMENT / COMMISSIONING RANGE · 50 Hz–10 kHz · NOT A SAFETY LIMIT</small>
         <div className="frequency-stepper" aria-label={`${label} precise frequency controls`}>
           <button aria-label={`Decrease ${label} frequency by 1 Hz`} disabled={audio.frequency <= AUDIO_FREQUENCY_MIN} onClick={() => applicationAudioRuntime.setFrequency(channelId, audio.frequency - 1)}>−</button>
           <small>1 HZ</small>
@@ -625,16 +653,31 @@ function SinePlayerControls({ channelId, label, audio, onPlace, onToggle }: {
     </div>;
 }
 
-function SineSourceInspector({ module, dispatch }: { module: ModuleInstance; dispatch: React.Dispatch<Parameters<typeof appReducer>[1]> }) {
-  const audio = useAudioChannel(module.audioChannelId ?? null);
-  if (!module.audioChannelId || !audio) return null;
-  const channelLabel = module.audioChannelId.replace("channel-", "CH ");
+function SineSourceInspector({ state, module, dispatch }: { state: AppState; module: ModuleInstance; dispatch: React.Dispatch<Parameters<typeof appReducer>[1]> }) {
+  const channel = state.threadChannels.find((item) => item.id === module.audioChannelId);
+  const audio = useAudioChannel(channel?.role === "clone" ? channel.sourceId : module.audioChannelId ?? null);
+  const [cascadeConfirmationModuleId, setCascadeConfirmationModuleId] = useState<string | null>(null);
+  const cascadeConfirmationOpen = cascadeConfirmationModuleId === module.id;
+  if (!module.audioChannelId || !audio || !channel) return null;
+  const channelLabel = channel.label;
+  const source = state.threadChannels.find((item) => item.id === channel.sourceId) ?? channel;
+  const clones = state.threadChannels.filter((item) => item.role === "clone" && item.sourceId === channel.id);
+  if (channel.role === "clone") return <div className="inspector-content sine-source-inspector clone-source-inspector">
+    <div className="selection-summary"><span>Clone endpoint</span><strong>{module.title}</strong><small>CLONE OF {source.label} · SHARED SOURCE</small></div>
+    <section className="clone-inherited-source" aria-label={`Inherited source programming from ${source.label}`}>
+      <span>SOURCE: {source.label.replace(" ", "")}</span><strong>SINE</strong><b>{audio.frequency} Hz</b><b>LEVEL {audio.level}%</b><small>LOCKED — ADJUST AT SOURCE</small>
+    </section>
+    <details className="inspector-section" open><summary>Endpoint state</summary><div className="connection-summary"><span>Identity</span><b>{channel.label} CLONE</b><span>Lineage</span><b>{source.label}</b><span>Routing</span><b>{state.channelTerminalConnections.some((connection) => connection.fromModuleId === module.id) ? "ROUTED" : "AWAITING CHANNEL OUT"}</b><span>Control</span><b>POSITION + LIVE TRIM AT SOUND DESK</b></div></details>
+    <p className="inspector-note">Waveform, frequency and programmed level are inherited. Select {source.label} to adjust shared source programming.</p>
+    <div className="lifecycle-actions clone-actions"><button className="danger" onClick={() => { applicationAudioRuntime.disposeChannel(channel.id); dispatch({ type: "delete-endpoint", channelId: channel.id }); }}>Quick Delete</button></div>
+  </div>;
   return <div className="inspector-content sine-source-inspector">
-    <div className="selection-summary"><span>Placed source</span><strong>{module.title}</strong><small>{channelLabel} · Sine oscillator</small></div>
+    <div className="selection-summary"><span>{channel.role === "duplicate" ? "Independent duplicate" : "Placed source"}</span><strong>{module.title}</strong><small>{channelLabel} · Sine oscillator{channel.duplicatedFrom ? ` · DUPLICATED FROM ${state.threadChannels.find((item) => item.id === channel.duplicatedFrom)?.label ?? channel.duplicatedFrom}` : ""}</small></div>
     <SinePlayerControls channelId={module.audioChannelId} label={channelLabel} audio={audio} />
-    <details className="inspector-section"><summary>Source binding</summary><div className="connection-summary"><span>Identity</span><b>{channelLabel}</b><span>Output</span><b>ONE RESOLVED STREAM</b><span>Destination</span><b>MATCHING CHANNEL OUT</b></div></details>
-    <p className="inspector-note">Connect this output to {channelLabel} Channel Out. Removing the node returns its player to Inputs &amp; Channels.</p>
-    <div className="lifecycle-actions"><button className="danger" onClick={() => dispatch({ type: "delete-selection" })}>Remove from workspace</button></div>
+    <details className="inspector-section"><summary>Source binding</summary><div className="connection-summary"><span>Identity</span><b>{channelLabel}</b><span>Output</span><b>ONE RESOLVED STREAM</b><span>Destination</span><b>ANY FREE CHANNEL OUT</b></div></details>
+    <p className="inspector-note">Connect this source endpoint to any free Channel Out. Removing the node returns its player to Inputs &amp; Channels.</p>
+    <details className="inspector-section source-actions" open><summary>Source actions</summary><div className="lifecycle-actions"><button onClick={() => dispatch({ type: "clone-source", sourceChannelId: channel.id })}>Clone</button><button onClick={() => dispatch({ type: "duplicate-source", sourceChannelId: channel.id })}>Duplicate</button></div></details>
+    {clones.length ? <div className="cascade-delete"><strong>{clones.length} LINKED CLONE PATH{clones.length === 1 ? "" : "S"}</strong><p>Deleting this source will also destroy every linked Clone path.</p>{cascadeConfirmationOpen ? <div className="cascade-confirmation" role="alert" aria-live="assertive"><strong>DELETE SOURCE?</strong><p>This permanently removes {channel.label} and all {clones.length} linked Clone path{clones.length === 1 ? "" : "s"}. Unrelated sources keep playing. This cannot be undone.</p><div><button onClick={() => setCascadeConfirmationModuleId(null)}>CANCEL</button><button className="danger" onClick={() => { applicationAudioRuntime.disposeSource(channel.id); dispatch({ type: "delete-source-family", sourceChannelId: channel.id }); setCascadeConfirmationModuleId(null); }}>DELETE SOURCE + ALL CLONES</button></div></div> : <button className="danger" onClick={() => setCascadeConfirmationModuleId(module.id)}>DELETE SOURCE…</button>}</div> : <div className="lifecycle-actions clone-actions"><button className="danger" onClick={() => dispatch({ type: "delete-selection" })}>Remove from workspace</button></div>}
   </div>;
 }
 
@@ -646,8 +689,7 @@ function SignalTrace({ soundingChannelKey, soundDeskMuted }: { soundingChannelKe
     const context = canvas.getContext("2d");
     if (!context) return;
     const soundingChannelIds = soundingChannelKey ? soundingChannelKey.split(",") as ChannelId[] : [];
-    const buffers = new Map(soundingChannelIds.map((channelId) => [channelId, new Float32Array(256)]));
-    const composite = new Float32Array(256);
+    const outputSamples = new Float32Array(512);
     let frame = 0;
     const draw = () => {
       const width = canvas.width;
@@ -655,21 +697,15 @@ function SignalTrace({ soundingChannelKey, soundDeskMuted }: { soundingChannelKe
       context.clearRect(0, 0, width, height);
       if (!soundingChannelIds.length) return;
       const baseColor = getComputedStyle(canvas).color;
-      composite.fill(0);
-      soundingChannelIds.forEach((channelId) => {
-        const buffer = buffers.get(channelId)!;
-        const data = applicationAudioRuntime.getWaveform(channelId, buffer);
-        if (!data) return;
-        data.forEach((value, index) => { composite[index] += value; });
-      });
-      const energyScale = Math.sqrt(soundingChannelIds.length);
+      const data = applicationAudioRuntime.getMasterWaveform(outputSamples);
+      if (!data) return;
       context.globalAlpha = 0.95;
       context.strokeStyle = baseColor;
       context.lineWidth = 1.8;
       context.beginPath();
-      composite.forEach((sum, index) => {
-        const x = index / Math.max(1, composite.length - 1) * width;
-        const value = Math.max(-1, Math.min(1, sum / energyScale));
+      data.forEach((sample, index) => {
+        const x = index / Math.max(1, data.length - 1) * width;
+        const value = Math.max(-1, Math.min(1, sample));
         const y = (0.5 - value * 0.42) * height;
         if (index === 0) context.moveTo(x, y); else context.lineTo(x, y);
       });
@@ -685,7 +721,24 @@ function SignalTrace({ soundingChannelKey, soundDeskMuted }: { soundingChannelKe
   return <div className={`signal-monitor ${soundingCount ? "signal-active" : ""}`} aria-label={soundingCount ? `Combined signal monitor active with ${soundingCount} sounding ${soundingCount === 1 ? "channel" : "channels"}` : idleLabel}>
     <canvas ref={canvasRef} width="360" height="72" aria-hidden="true" />
     {!soundingCount && <><div className="signal-baseline" aria-hidden="true" /><strong>{soundDeskMuted ? "SD MUTED" : "NO SIGNAL"}</strong><small>{soundDeskMuted ? "Sound Desk Live Trim -100%" : "Start and route a channel, then play the session"}</small></>}
-    {soundingCount > 0 && <small>COMBINED SIGNAL · {soundingCount} {soundingCount === 1 ? "CHANNEL" : "CHANNELS"}{soundDeskMuted ? " · FOCUS SD MUTED" : ""}</small>}
+    {soundingCount > 0 && <small>FINAL OUTPUT · {soundingCount} {soundingCount === 1 ? "PATH" : "PATHS"}{soundDeskMuted ? " · FOCUS SD MUTED" : ""}</small>}
+  </div>;
+}
+
+function formatDbfs(value: number) {
+  return Number.isFinite(value) ? `${value.toFixed(1)} dBFS` : "−∞ dBFS";
+}
+
+function MasterSafetyMeter() {
+  useMasterSafetyRevision();
+  const safety = applicationAudioRuntime.getMasterSafetySnapshot();
+  return <div className={`master-safety-meter safety-${safety.state.toLowerCase().replace(" ", "-")}`} aria-label="Master safety meter">
+    <span>MASTER SAFETY</span>
+    <strong>{formatDbfs(safety.currentPeakDbfs)}</strong>
+    <small>HOLD {formatDbfs(safety.peakHoldDbfs)} · REDUCTION {Number.isFinite(safety.reductionDb) ? `${safety.reductionDb.toFixed(1)} dB` : "MUTED"}</small>
+    <b>{safety.available ? safety.state : "STANDBY"}</b>
+    {safety.muteReason && <em>{safety.muteReason}</em>}
+    {safety.state === "SAFETY MUTE" && <button onClick={() => applicationAudioRuntime.resetSafetyMute()}>RESET SAFETY MUTE</button>}
   </div>;
 }
 
@@ -696,7 +749,7 @@ function Monitor({ state, selectedModule, selectedModules, selectedConnection }:
   selectedConnection: ThreadConnection | null;
 }) {
   const selectedChannel = state.selection?.kind === "channel" ? state.threadChannels.find((channel) => channel.id === state.selection?.id) ?? null : null;
-  const sourceChannel = selectedModule ? state.channelTerminalConnections.find((connection) => connection.fromModuleId === selectedModule.id)?.channelId : null;
+  const sourceChannel = selectedModule?.audioChannelId ?? (selectedModule ? state.channelTerminalConnections.find((connection) => connection.fromModuleId === selectedModule.id)?.channelId : null);
   const currentChannel = selectedChannel ?? state.threadChannels.find((channel) => channel.id === sourceChannel) ?? state.threadChannels[0] ?? null;
   const audio = useAudioChannel(currentChannel?.id ?? null);
   const soundingChannelKey = applicationAudioRuntime.getSoundingChannelIds().join(",");
@@ -705,12 +758,13 @@ function Monitor({ state, selectedModule, selectedModules, selectedConnection }:
   const audioFocused = Boolean(audio && currentChannel && (selectedChannel || sourceChannel || !state.selection));
   const focusTitle = audioFocused ? "SINE" : selectedModules.length > 1 ? `${selectedModules.length} NODES` : selectedModule ? selectedModule.title : selectedConnection ? "THREAD" : selectedChannel ? selectedChannel.label : "IDLE";
   const focusType = audioFocused && audio ? `${audio.frequency} Hz · LEVEL ${audio.level}%` : selectedModule ? selectedModule.type.replaceAll("-", " ").toUpperCase() : selectedConnection ? "COMMITTED CONNECTION" : selectedChannel ? "CHANNEL OUTPUT" : "NO OBJECT SELECTED";
-  const focusDetail = audioFocused && audio ? soundDeskMuted ? "SD MUTED · SOUND DESK LIVE TRIM -100%" : audio.active ? "ACTIVE · CENTRED OUTPUT" : audio.availability === "error" ? audio.message : "SILENT · READY" : selectedModule && display ? `${display.detail} · ${display.value}` : selectedConnection ? selectedConnection.id : selectedChannel ? (state.channelTerminalConnections.some((connection) => connection.channelId === selectedChannel.id) ? "OUTPUT READY" : "AWAITING OUTPUT") : "Select a node, Thread, or channel";
+  const focusDetail = audioFocused && audio ? soundDeskMuted ? "SD MUTED · SOUND DESK LIVE TRIM -100%" : audio.active && !audio.routable ? "UNROUTED · NO CHANNEL OUT" : audio.active ? "ACTIVE · CENTRED OUTPUT" : audio.availability === "error" ? audio.message : "SILENT · READY" : selectedModule && display ? `${display.detail} · ${display.value}` : selectedConnection ? selectedConnection.id : selectedChannel ? (state.channelTerminalConnections.some((connection) => connection.channelId === selectedChannel.id) ? "OUTPUT READY" : "AWAITING OUTPUT") : "Select a node, Thread, or channel";
   return <div className="monitor-content" role="status" aria-live="polite" aria-label="Selection monitor">
     <div className="monitor-focus"><span>CURRENT FOCUS</span><strong>{currentChannel ? `${currentChannel.label} / ${String(state.threadChannels.length).padStart(2, "0")}` : "NO CHANNEL"}</strong><small>{focusTitle}</small></div>
     <div className="monitor-object"><span>OBJECT</span><strong>{focusType}</strong><small>{focusDetail}</small></div>
     {audio && currentChannel ? <SignalTrace soundingChannelKey={soundingChannelKey} soundDeskMuted={soundDeskMuted} /> : <div className="signal-monitor" aria-label="Signal monitor idle; no channel"><div className="signal-baseline" aria-hidden="true" /><strong>NO CHANNEL</strong><small>Add a channel to begin</small></div>}
-    <div className="monitor-session"><span>AUDIO</span><strong>{soundDeskMuted ? "SD MUTED" : audio?.active ? "ACTIVE" : audio?.availability === "error" ? "ERROR" : "SILENT"}</strong><small>{audio ? soundDeskMuted ? "Sound Desk Live Trim -100%" : audio.active ? `${audio.frequency} Hz · ${audio.level}%` : audio.message : "No channel selected"}</small></div>
+    <MasterSafetyMeter />
+    <div className="monitor-session"><span>AUDIO</span><strong>{soundDeskMuted ? "SD MUTED" : audio?.active && !audio.routable ? "UNROUTED" : audio?.active ? "ACTIVE" : audio?.availability === "error" ? "ERROR" : "SILENT"}</strong><small>{audio ? soundDeskMuted ? "Sound Desk Live Trim -100%" : audio.active && !audio.routable ? "Connect to any free Channel Out" : audio.active ? `${audio.frequency} Hz · ${audio.level}%` : audio.message : "No channel selected"}</small></div>
   </div>;
 }
 
@@ -744,6 +798,7 @@ export default function Home() {
   const canvasRef = useRef<HTMLDivElement>(null);
   const panDrag = useRef<{ startX: number; startY: number; originX: number; originY: number } | null>(null);
   const userEditedRef = useRef(false);
+  const copiedDuplicateIds = useRef(new Set<ChannelId>());
   const uiConfig = themeConfigs[theme];
   const selectedModuleIds = getSelectedModuleIds(state.selection);
   const selectedModules = state.modules.filter((module) => selectedModuleIds.includes(module.id));
@@ -758,7 +813,12 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    applicationAudioRuntime.synchronizeChannels(state.threadChannels.map((channel) => channel.id));
+    applicationAudioRuntime.synchronizeTopology(state.threadChannels);
+    state.threadChannels.forEach((channel) => {
+      if (channel.role !== "duplicate" || !channel.duplicatedFrom || copiedDuplicateIds.current.has(channel.id)) return;
+      applicationAudioRuntime.copyProgramming(channel.duplicatedFrom, channel.id);
+      copiedDuplicateIds.current.add(channel.id);
+    });
   }, [state.threadChannels]);
 
   useEffect(() => {

@@ -1,7 +1,8 @@
 import type { ChannelId } from "./channel-routing";
+import type { ThreadChannel } from "./channel-routing";
 
-export const AUDIO_FREQUENCY_MIN = 40;
-export const AUDIO_FREQUENCY_MAX = 2_000;
+export const AUDIO_FREQUENCY_MIN = 50;
+export const AUDIO_FREQUENCY_MAX = 10_000;
 export const AUDIO_DEFAULT_FREQUENCY = 78;
 export const AUDIO_DEFAULT_LEVEL = 20;
 export const LIVE_TRIM_MIN = -100;
@@ -9,6 +10,9 @@ export const LIVE_TRIM_MAX = 16;
 const CHANNEL_GAIN_MAX = 0.2;
 const MASTER_GAIN = 0.8;
 export const LIVE_AUDIO_RAMP_SECONDS = 0.02;
+export const OUTPUT_SAFETY_CEILING_DBFS = -6;
+export const OUTPUT_SAFETY_CAUTION_DBFS = -9;
+export const OUTPUT_METER_RATE_HZ = 30;
 
 export type AudioAvailability = "unavailable" | "ready" | "active" | "stopped" | "error";
 
@@ -41,6 +45,23 @@ export type AudioRuntimeDiagnostics = Readonly<{
   sourceCreations: number;
   sourceDisposals: number;
   activeSources: number;
+  safetyCreations: number;
+  safetyDisposals: number;
+  finalAnalyserCreations: number;
+  finalAnalyserDisposals: number;
+}>;
+
+export type MasterSafetyState = "NORMAL" | "CAUTION" | "LIMITING" | "OVERLOAD" | "SAFETY MUTE";
+
+export type MasterSafetySnapshot = Readonly<{
+  currentPeakDbfs: number;
+  peakHoldDbfs: number;
+  reductionDb: number;
+  inputPeakDbfs: number;
+  state: MasterSafetyState;
+  muteReason: string;
+  available: boolean;
+  meterRateHz: number;
 }>;
 
 type AudioParamLike = {
@@ -54,6 +75,12 @@ type AudioNodeLike = {
   connect(destination: AudioNodeLike): AudioNodeLike | void;
   disconnect(): void;
 };
+type MessagePortLike = {
+  onmessage: ((event: { data?: unknown }) => void) | null;
+  postMessage(message: unknown): void;
+  close?(): void;
+};
+type SafetyNodeLike = AudioNodeLike & { port: MessagePortLike };
 
 type GainNodeLike = AudioNodeLike & { gain: AudioParamLike };
 type StereoPannerNodeLike = AudioNodeLike & { pan: AudioParamLike };
@@ -83,9 +110,11 @@ type AudioContextLike = {
 };
 
 export type AudioContextFactory = () => AudioContextLike;
+export type SafetyNodeFactory = (context: AudioContextLike) => Promise<SafetyNodeLike>;
 
 type ChannelAudioInstance = {
   id: ChannelId;
+  sourceId: ChannelId;
   gain: GainNodeLike;
   liveTrimGain: GainNodeLike;
   analyser: AnalyserNodeLike;
@@ -102,8 +131,21 @@ type ChannelAudioInstance = {
   message: string;
 };
 
+type SourceAudioInstance = {
+  id: ChannelId;
+  source: OscillatorNodeLike | null;
+  envelope: GainNodeLike | null;
+  frequency: number;
+  level: number;
+  active: boolean;
+};
+
 function clamp(value: number, minimum: number, maximum: number) {
   return Math.min(maximum, Math.max(minimum, value));
+}
+
+function finiteNumber(value: unknown, fallback: number) {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
 export function getDefaultChannelFrequency(channelId: ChannelId) {
@@ -115,16 +157,16 @@ export function getDefaultChannelFrequency(channelId: ChannelId) {
 export type SessionPlaybackState = "playing" | "paused" | "stopped";
 
 export function liveTrimMultiplier(liveTrim: number) {
-  return 1 + clamp(liveTrim, LIVE_TRIM_MIN, LIVE_TRIM_MAX) / 100;
+  return 1 + clamp(finiteNumber(liveTrim, 0), LIVE_TRIM_MIN, LIVE_TRIM_MAX) / 100;
 }
 
 export function spatialXToPan(x: number) {
-  return clamp(x / 2, -1, 1);
+  return clamp(finiteNumber(x, 0) / 2, -1, 1);
 }
 
 function ramp(parameter: AudioParamLike, value: number, now: number) {
   parameter.cancelScheduledValues(now);
-  parameter.setValueAtTime(parameter.value, now);
+  parameter.setValueAtTime(finiteNumber(parameter.value, 0), now);
   parameter.linearRampToValueAtTime(value, now + LIVE_AUDIO_RAMP_SECONDS);
 }
 
@@ -134,16 +176,49 @@ function browserAudioContextFactory(): AudioContextLike {
   return new AudioContextConstructor();
 }
 
+async function browserSafetyNodeFactory(context: AudioContextLike): Promise<SafetyNodeLike> {
+  const browserContext = context as AudioContext;
+  if (!browserContext.audioWorklet || typeof globalThis.AudioWorkletNode === "undefined") {
+    throw new Error("Required output safety processor is unavailable; audio remains disconnected");
+  }
+  await browserContext.audioWorklet.addModule("/audio-safety-worklet.js");
+  return new AudioWorkletNode(browserContext, "rfe-output-safety", {
+    numberOfInputs: 1,
+    numberOfOutputs: 1,
+    outputChannelCount: [2],
+    channelCount: 2,
+    channelCountMode: "clamped-max",
+    channelInterpretation: "speakers",
+  }) as unknown as SafetyNodeLike;
+}
+
 export class ApplicationAudioRuntime {
   private readonly createContext: AudioContextFactory;
+  private readonly createSafetyNode: SafetyNodeFactory;
   private context: AudioContextLike | null = null;
   private master: GainNodeLike | null = null;
   private sessionGate: GainNodeLike | null = null;
+  private safetyNode: SafetyNodeLike | null = null;
+  private finalAnalyser: AnalyserNodeLike | null = null;
+  private infrastructurePromise: Promise<void> | null = null;
   private sessionPlaybackState: SessionPlaybackState = "playing";
   private channels = new Map<ChannelId, ChannelAudioInstance>();
+  private sources = new Map<ChannelId, SourceAudioInstance>();
+  private sourceIds = new Map<ChannelId, ChannelId>();
   private configurations = new Map<ChannelId, { frequency: number; level: number; liveTrim: number; pan: number; routable: boolean }>();
   private failures = new Map<ChannelId, string>();
   private listeners = new Set<() => void>();
+  private masterSafetyListeners = new Set<() => void>();
+  private masterSafety: MasterSafetySnapshot = {
+    currentPeakDbfs: Number.NEGATIVE_INFINITY,
+    peakHoldDbfs: Number.NEGATIVE_INFINITY,
+    reductionDb: 0,
+    inputPeakDbfs: Number.NEGATIVE_INFINITY,
+    state: "NORMAL",
+    muteReason: "",
+    available: false,
+    meterRateHz: OUTPUT_METER_RATE_HZ,
+  };
   private diagnostics: AudioRuntimeDiagnostics = {
     runtimeCreations: 1,
     contextCreations: 0,
@@ -160,10 +235,15 @@ export class ApplicationAudioRuntime {
     sourceCreations: 0,
     sourceDisposals: 0,
     activeSources: 0,
+    safetyCreations: 0,
+    safetyDisposals: 0,
+    finalAnalyserCreations: 0,
+    finalAnalyserDisposals: 0,
   };
 
-  constructor(createContext: AudioContextFactory = browserAudioContextFactory) {
+  constructor(createContext: AudioContextFactory = browserAudioContextFactory, createSafetyNode: SafetyNodeFactory = browserSafetyNodeFactory) {
     this.createContext = createContext;
+    this.createSafetyNode = createSafetyNode;
   }
 
   subscribe = (listener: () => void) => {
@@ -171,28 +251,36 @@ export class ApplicationAudioRuntime {
     return () => { this.listeners.delete(listener); };
   };
 
+  subscribeMasterSafety = (listener: () => void) => {
+    this.masterSafetyListeners.add(listener);
+    return () => { this.masterSafetyListeners.delete(listener); };
+  };
+
   getChannelSnapshot(channelId: ChannelId): AudioChannelSnapshot {
     const channel = this.channels.get(channelId);
+    const sourceId = this.getSourceId(channelId);
+    const source = this.sources.get(sourceId);
+    const sourceConfiguration = this.configurations.get(sourceId);
     return channel ? {
       channelId,
-      frequency: channel.frequency,
-      level: channel.level,
+      frequency: source?.frequency ?? sourceConfiguration?.frequency ?? channel.frequency,
+      level: source?.level ?? sourceConfiguration?.level ?? channel.level,
       liveTrim: channel.liveTrim,
       effectiveLevel: channel.routable ? channel.level * liveTrimMultiplier(channel.liveTrim) : 0,
       pan: channel.pan,
       routable: channel.routable,
-      active: channel.active,
+      active: source?.active ?? channel.active,
       availability: channel.availability,
       message: channel.message,
     } : {
       channelId,
-      frequency: this.configurations.get(channelId)?.frequency ?? getDefaultChannelFrequency(channelId),
-      level: this.configurations.get(channelId)?.level ?? AUDIO_DEFAULT_LEVEL,
+      frequency: source?.frequency ?? sourceConfiguration?.frequency ?? getDefaultChannelFrequency(sourceId),
+      level: source?.level ?? sourceConfiguration?.level ?? AUDIO_DEFAULT_LEVEL,
       liveTrim: this.configurations.get(channelId)?.liveTrim ?? 0,
       effectiveLevel: (this.configurations.get(channelId)?.routable ?? true) ? (this.configurations.get(channelId)?.level ?? AUDIO_DEFAULT_LEVEL) * liveTrimMultiplier(this.configurations.get(channelId)?.liveTrim ?? 0) : 0,
       pan: this.configurations.get(channelId)?.pan ?? 0,
       routable: this.configurations.get(channelId)?.routable ?? true,
-      active: false,
+      active: source?.active ?? false,
       availability: this.failures.has(channelId) ? "error" : typeof globalThis.AudioContext === "undefined" && typeof (globalThis as typeof globalThis & { webkitAudioContext?: unknown }).webkitAudioContext === "undefined" ? "unavailable" : "ready",
       message: this.failures.get(channelId) ?? "Ready to start",
     };
@@ -200,6 +288,17 @@ export class ApplicationAudioRuntime {
 
   getDiagnostics() {
     return { ...this.diagnostics };
+  }
+
+  getMasterSafetySnapshot() {
+    return { ...this.masterSafety };
+  }
+
+  resetSafetyMute() {
+    if (this.masterSafety.state !== "SAFETY MUTE") return;
+    this.safetyNode?.port.postMessage({ type: "reset-safety-mute" });
+    this.masterSafety = { ...this.masterSafety, state: "NORMAL", muteReason: "", reductionDb: 0 };
+    this.emitMasterSafety();
   }
 
   getContextIdentity() {
@@ -211,13 +310,13 @@ export class ApplicationAudioRuntime {
   }
 
   getActiveChannelIds() {
-    return [...this.channels.values()].filter((channel) => channel.active).map((channel) => channel.id);
+    return [...this.channels.values()].filter((channel) => this.sources.get(channel.sourceId)?.active).map((channel) => channel.id);
   }
 
   getSoundingChannelIds() {
     if (this.sessionPlaybackState !== "playing") return [];
     return [...this.channels.values()]
-      .filter((channel) => channel.active && channel.routable && channel.level > 0 && liveTrimMultiplier(channel.liveTrim) > 0)
+      .filter((channel) => this.sources.get(channel.sourceId)?.active && channel.routable && channel.level > 0 && liveTrimMultiplier(channel.liveTrim) > 0)
       .map((channel) => channel.id);
   }
 
@@ -235,19 +334,37 @@ export class ApplicationAudioRuntime {
     if (changed) this.emit();
   }
 
+  synchronizeTopology(channels: readonly Pick<ThreadChannel, "id" | "sourceId">[]) {
+    const previous = new Map(this.sourceIds);
+    this.sourceIds = new Map(channels.map((channel) => [channel.id, channel.sourceId ?? channel.id]));
+    this.synchronizeChannels(channels.map((channel) => channel.id));
+    channels.forEach((channel) => {
+      const sourceId = channel.sourceId ?? channel.id;
+      if (!this.configurations.has(sourceId)) this.getOrCreateConfiguration(sourceId);
+      if (previous.get(channel.id) !== sourceId && this.channels.has(channel.id)) this.disposeChannel(channel.id);
+      if (channel.id !== sourceId && this.sources.get(sourceId)?.active) this.ensureChannel(channel.id);
+    });
+    new Set(this.sourceIds.values()).forEach((sourceId) => this.updateFamilyProgrammedGain(sourceId));
+  }
+
   async startChannel(channelId: ChannelId) {
     try {
+      await this.ensureInfrastructure();
       const channel = this.ensureChannel(channelId);
-      if (channel.active && channel.source) return;
+      const sourceId = channel.sourceId;
+      const existingSource = this.sources.get(sourceId);
+      if (existingSource?.active && existingSource.source) return;
       if (this.context!.state === "suspended") await this.context!.resume();
+      this.sourceIds.forEach((mappedSourceId, endpointId) => { if (mappedSourceId === sourceId) this.ensureChannel(endpointId); });
 
       const source = this.context!.createOscillator();
       const envelope = this.context!.createGain();
+      const programming = this.getOrCreateConfiguration(sourceId);
       source.type = "sine";
-      source.frequency.setValueAtTime(channel.frequency, this.context!.currentTime);
+      source.frequency.setValueAtTime(programming.frequency, this.context!.currentTime);
       envelope.gain.setValueAtTime(0, this.context!.currentTime);
       source.connect(envelope);
-      envelope.connect(channel.gain);
+      this.channels.forEach((endpoint) => { if (endpoint.sourceId === sourceId) envelope.connect(endpoint.gain); });
       this.smooth(envelope.gain, 1);
       source.onended = () => {
         source.disconnect();
@@ -255,12 +372,9 @@ export class ApplicationAudioRuntime {
         this.diagnostics = { ...this.diagnostics, sourceDisposals: this.diagnostics.sourceDisposals + 1 };
       };
       source.start();
-      channel.source = source;
-      channel.sourceEnvelope = envelope;
-      channel.active = true;
-      channel.availability = "active";
-      channel.message = "Sine signal active";
-      this.failures.delete(channelId);
+      this.sources.set(sourceId, { id: sourceId, source, envelope, frequency: programming.frequency, level: programming.level, active: true });
+      this.channels.forEach((endpoint) => { if (endpoint.sourceId === sourceId) { endpoint.active = true; endpoint.availability = "active"; endpoint.message = "Shared sine signal active"; } });
+      this.failures.delete(sourceId);
       this.diagnostics = { ...this.diagnostics, sourceCreations: this.diagnostics.sourceCreations + 1, activeSources: this.diagnostics.activeSources + 1 };
       this.emit();
     } catch (error) {
@@ -275,17 +389,17 @@ export class ApplicationAudioRuntime {
   }
 
   stopChannel(channelId: ChannelId) {
-    const channel = this.channels.get(channelId);
-    if (!channel?.source || !this.context) return;
-    const source = channel.source;
-    const envelope = channel.sourceEnvelope;
+    const sourceId = this.getSourceId(channelId);
+    const sourceState = this.sources.get(sourceId);
+    if (!sourceState?.source || !this.context) return;
+    const source = sourceState.source;
+    const envelope = sourceState.envelope;
     if (envelope) this.smooth(envelope.gain, 0);
     source.stop(this.context.currentTime + LIVE_AUDIO_RAMP_SECONDS);
-    channel.source = null;
-    channel.sourceEnvelope = null;
-    channel.active = false;
-    channel.availability = "stopped";
-    channel.message = "Signal stopped";
+    sourceState.source = null;
+    sourceState.envelope = null;
+    sourceState.active = false;
+    this.channels.forEach((endpoint) => { if (endpoint.sourceId === sourceId) { endpoint.active = false; endpoint.availability = "stopped"; endpoint.message = "Signal stopped at source"; } });
     this.diagnostics = { ...this.diagnostics, activeSources: Math.max(0, this.diagnostics.activeSources - 1) };
     this.emit();
   }
@@ -296,29 +410,39 @@ export class ApplicationAudioRuntime {
   }
 
   setFrequency(channelId: ChannelId, frequency: number) {
-    const safeFrequency = Math.round(clamp(frequency, AUDIO_FREQUENCY_MIN, AUDIO_FREQUENCY_MAX));
+    channelId = this.getSourceId(channelId);
+    const currentFrequency = this.configurations.get(channelId)?.frequency ?? getDefaultChannelFrequency(channelId);
+    const safeFrequency = Math.round(clamp(finiteNumber(frequency, currentFrequency), AUDIO_FREQUENCY_MIN, AUDIO_FREQUENCY_MAX));
     const channel = this.channels.get(channelId);
     const configuration = this.getOrCreateConfiguration(channelId);
     this.configurations.set(channelId, { ...configuration, frequency: safeFrequency });
     if (!channel) { this.emit(); return; }
     channel.frequency = safeFrequency;
-    if (channel.source && this.context) this.smooth(channel.source.frequency, safeFrequency);
+    const source = this.sources.get(channelId);
+    if (source) source.frequency = safeFrequency;
+    if (source?.source && this.context) this.smooth(source.source.frequency, safeFrequency);
     this.emit();
   }
 
   setLevel(channelId: ChannelId, level: number) {
-    const safeLevel = Math.round(clamp(level, 0, 100));
-    const channel = this.channels.get(channelId);
+    channelId = this.getSourceId(channelId);
+    const currentLevel = this.configurations.get(channelId)?.level ?? AUDIO_DEFAULT_LEVEL;
+    const safeLevel = Math.round(clamp(finiteNumber(level, currentLevel), 0, 100));
     const configuration = this.getOrCreateConfiguration(channelId);
     this.configurations.set(channelId, { ...configuration, level: safeLevel });
-    if (!channel) { this.emit(); return; }
-    channel.level = safeLevel;
-    if (this.context) this.smooth(channel.gain.gain, safeLevel / 100 * CHANNEL_GAIN_MAX);
+    const source = this.sources.get(channelId);
+    if (source) source.level = safeLevel;
+    this.channels.forEach((endpoint) => {
+      if (endpoint.sourceId !== channelId) return;
+      endpoint.level = safeLevel;
+      if (this.context) this.smooth(endpoint.gain.gain, safeLevel / 100 * CHANNEL_GAIN_MAX * this.getFamilyGainScale(channelId));
+    });
     this.emit();
   }
 
   setLiveTrim(channelId: ChannelId, liveTrim: number) {
-    const safeLiveTrim = Math.round(clamp(liveTrim, LIVE_TRIM_MIN, LIVE_TRIM_MAX));
+    const currentTrim = this.configurations.get(channelId)?.liveTrim ?? 0;
+    const safeLiveTrim = Math.round(clamp(finiteNumber(liveTrim, currentTrim), LIVE_TRIM_MIN, LIVE_TRIM_MAX));
     const configuration = this.getOrCreateConfiguration(channelId);
     this.configurations.set(channelId, { ...configuration, liveTrim: safeLiveTrim });
     const channel = this.channels.get(channelId);
@@ -330,6 +454,7 @@ export class ApplicationAudioRuntime {
   }
 
   setChannelRoutable(channelId: ChannelId, routable: boolean) {
+    routable = routable === true;
     const configuration = this.getOrCreateConfiguration(channelId);
     const channel = this.channels.get(channelId);
     if (configuration.routable === routable && (!channel || channel.routable === routable)) return;
@@ -373,23 +498,35 @@ export class ApplicationAudioRuntime {
 
   getWaveform(channelId: ChannelId, target = new Float32Array(256)): Float32Array | null {
     const channel = this.channels.get(channelId);
-    if (!channel?.active) return null;
+    if (!channel || !this.sources.get(channel.sourceId)?.active) return null;
     const data = target.length === channel.analyser.frequencyBinCount ? target : new Float32Array(channel.analyser.frequencyBinCount);
     channel.analyser.getFloatTimeDomainData(data);
+    return data;
+  }
+
+  getMasterWaveform(target = new Float32Array(512)): Float32Array | null {
+    if (!this.finalAnalyser || this.sessionPlaybackState !== "playing") return null;
+    const data = target.length === this.finalAnalyser.frequencyBinCount ? target : new Float32Array(this.finalAnalyser.frequencyBinCount);
+    this.finalAnalyser.getFloatTimeDomainData(data);
     return data;
   }
 
   disposeChannel(channelId: ChannelId) {
     const channel = this.channels.get(channelId);
     if (!channel) return;
-    this.stopChannel(channelId);
+    if (channel.id === channel.sourceId) this.stopChannel(channelId);
     channel.analyser.disconnect();
     channel.panner.disconnect();
     channel.liveTrimGain.disconnect();
     channel.gain.disconnect();
+    const source = this.sources.get(channel.sourceId);
+    source?.envelope?.disconnect();
+    if (source?.envelope) this.channels.forEach((endpoint) => { if (endpoint.id !== channelId && endpoint.sourceId === channel.sourceId) source.envelope!.connect(endpoint.gain); });
     this.channels.delete(channelId);
     this.configurations.delete(channelId);
     this.failures.delete(channelId);
+    this.sourceIds.delete(channelId);
+    this.updateFamilyProgrammedGain(channel.sourceId);
     this.diagnostics = {
       ...this.diagnostics,
       channelDisposals: this.diagnostics.channelDisposals + 1,
@@ -400,49 +537,115 @@ export class ApplicationAudioRuntime {
     this.emit();
   }
 
+  disposeSource(sourceId: ChannelId) {
+    const family = [...this.channels.values()].filter((channel) => channel.sourceId === sourceId).map((channel) => channel.id);
+    this.stopChannel(sourceId);
+    family.forEach((channelId) => this.disposeChannel(channelId));
+    this.sources.delete(sourceId);
+    this.configurations.delete(sourceId);
+  }
+
+  copyProgramming(fromChannelId: ChannelId, toChannelId: ChannelId) {
+    const snapshot = this.getChannelSnapshot(fromChannelId);
+    this.setFrequency(toChannelId, snapshot.frequency);
+    this.setLevel(toChannelId, snapshot.level);
+  }
+
   async shutdownApplication() {
+    const hadSafetyNode = Boolean(this.safetyNode);
+    const hadFinalAnalyser = Boolean(this.finalAnalyser);
     for (const channelId of [...this.channels.keys()]) this.disposeChannel(channelId);
     await this.context?.close();
+    this.safetyNode?.port.close?.();
+    this.safetyNode?.disconnect();
+    this.finalAnalyser?.disconnect();
     this.context = null;
     this.master = null;
     this.sessionGate = null;
+    this.safetyNode = null;
+    this.finalAnalyser = null;
+    this.infrastructurePromise = null;
+    this.sources.clear();
+    this.sourceIds.clear();
     this.sessionPlaybackState = "playing";
+    this.masterSafety = { ...this.masterSafety, currentPeakDbfs: Number.NEGATIVE_INFINITY, peakHoldDbfs: Number.NEGATIVE_INFINITY, reductionDb: 0, inputPeakDbfs: Number.NEGATIVE_INFINITY, state: "NORMAL", muteReason: "", available: false };
+    this.diagnostics = {
+      ...this.diagnostics,
+      safetyDisposals: this.diagnostics.safetyDisposals + (hadSafetyNode ? 1 : 0),
+      finalAnalyserDisposals: this.diagnostics.finalAnalyserDisposals + (hadFinalAnalyser ? 1 : 0),
+    };
     this.emit();
+    this.emitMasterSafety();
   }
 
-  private ensureInfrastructure() {
-    if (this.context && this.master && this.sessionGate) return;
-    this.context = this.createContext();
-    this.diagnostics = { ...this.diagnostics, contextCreations: this.diagnostics.contextCreations + 1 };
-    this.master = this.context.createGain();
-    this.master.gain.setValueAtTime(MASTER_GAIN, this.context.currentTime);
-    this.master.connect(this.context.destination);
-    this.sessionGate = this.context.createGain();
-    this.sessionGate.gain.setValueAtTime(this.sessionPlaybackState === "playing" ? 1 : 0, this.context.currentTime);
-    this.sessionGate.connect(this.master);
-    this.diagnostics = { ...this.diagnostics, masterCreations: this.diagnostics.masterCreations + 1, sessionGateCreations: this.diagnostics.sessionGateCreations + 1 };
+  private async ensureInfrastructure() {
+    if (this.context && this.master && this.sessionGate && this.safetyNode && this.finalAnalyser) return;
+    if (this.infrastructurePromise) return this.infrastructurePromise;
+    this.infrastructurePromise = (async () => {
+      const context = this.createContext();
+      this.context = context;
+      this.diagnostics = { ...this.diagnostics, contextCreations: this.diagnostics.contextCreations + 1 };
+      try {
+        const safetyNode = await this.createSafetyNode(context);
+        const master = context.createGain();
+        const sessionGate = context.createGain();
+        const finalAnalyser = context.createAnalyser();
+        master.gain.setValueAtTime(MASTER_GAIN, context.currentTime);
+        sessionGate.gain.setValueAtTime(this.sessionPlaybackState === "playing" ? 1 : 0, context.currentTime);
+        finalAnalyser.fftSize = 1024;
+        finalAnalyser.smoothingTimeConstant = 0;
+        sessionGate.connect(master);
+        master.connect(safetyNode);
+        safetyNode.connect(finalAnalyser);
+        finalAnalyser.connect(context.destination);
+        safetyNode.port.onmessage = (event) => this.handleSafetyMessage(event.data);
+        this.master = master;
+        this.sessionGate = sessionGate;
+        this.safetyNode = safetyNode;
+        this.finalAnalyser = finalAnalyser;
+        this.masterSafety = { ...this.masterSafety, available: true };
+        this.diagnostics = {
+          ...this.diagnostics,
+          masterCreations: this.diagnostics.masterCreations + 1,
+          sessionGateCreations: this.diagnostics.sessionGateCreations + 1,
+          safetyCreations: this.diagnostics.safetyCreations + 1,
+          finalAnalyserCreations: this.diagnostics.finalAnalyserCreations + 1,
+        };
+      } catch (error) {
+        await context.close();
+        this.context = null;
+        throw error;
+      }
+    })().finally(() => { this.infrastructurePromise = null; });
+    return this.infrastructurePromise;
   }
 
   private ensureChannel(channelId: ChannelId) {
     const existing = this.channels.get(channelId);
     if (existing) return existing;
-    this.ensureInfrastructure();
+    if (!this.context || !this.sessionGate || !this.master || !this.safetyNode || !this.finalAnalyser) {
+      throw new Error("Authoritative output safety path is not initialized");
+    }
     const gain = this.context!.createGain();
     const liveTrimGain = this.context!.createGain();
     const analyser = this.context!.createAnalyser();
     const panner = this.context!.createStereoPanner();
     analyser.fftSize = 512;
     analyser.smoothingTimeConstant = 0.55;
-    const configuration = this.getOrCreateConfiguration(channelId);
-    gain.gain.setValueAtTime(configuration.level / 100 * CHANNEL_GAIN_MAX, this.context!.currentTime);
-    liveTrimGain.gain.setValueAtTime(configuration.routable ? liveTrimMultiplier(configuration.liveTrim) : 0, this.context!.currentTime);
-    panner.pan.setValueAtTime(configuration.pan, this.context!.currentTime);
+    const sourceId = this.getSourceId(channelId);
+    const endpointConfiguration = this.getOrCreateConfiguration(channelId);
+    const sourceConfiguration = this.getOrCreateConfiguration(sourceId);
+    gain.gain.setValueAtTime(sourceConfiguration.level / 100 * CHANNEL_GAIN_MAX * this.getFamilyGainScale(sourceId), this.context!.currentTime);
+    liveTrimGain.gain.setValueAtTime(endpointConfiguration.routable ? liveTrimMultiplier(endpointConfiguration.liveTrim) : 0, this.context!.currentTime);
+    panner.pan.setValueAtTime(endpointConfiguration.pan, this.context!.currentTime);
     gain.connect(liveTrimGain);
     liveTrimGain.connect(analyser);
     analyser.connect(panner);
     panner.connect(this.sessionGate!);
-    const channel: ChannelAudioInstance = { id: channelId, gain, liveTrimGain, analyser, panner, source: null, sourceEnvelope: null, frequency: configuration.frequency, level: configuration.level, liveTrim: configuration.liveTrim, pan: configuration.pan, routable: configuration.routable, active: false, availability: "ready", message: "Ready to start" };
+    const source = this.sources.get(sourceId);
+    const channel: ChannelAudioInstance = { id: channelId, sourceId, gain, liveTrimGain, analyser, panner, source: null, sourceEnvelope: null, frequency: sourceConfiguration.frequency, level: sourceConfiguration.level, liveTrim: endpointConfiguration.liveTrim, pan: endpointConfiguration.pan, routable: endpointConfiguration.routable, active: source?.active ?? false, availability: source?.active ? "active" : "ready", message: source?.active ? "Shared sine signal active" : "Ready to start" };
     this.channels.set(channelId, channel);
+    if (source?.envelope) source.envelope.connect(gain);
     this.diagnostics = {
       ...this.diagnostics,
       channelCreations: this.diagnostics.channelCreations + 1,
@@ -459,14 +662,56 @@ export class ApplicationAudioRuntime {
     return configuration;
   }
 
+  private getSourceId(channelId: ChannelId) {
+    return this.sourceIds.get(channelId) ?? channelId;
+  }
+
+  // Equal-power family normalisation preserves conservative master headroom as
+  // one shared signal fans out. Endpoint trim and pan remain fully independent.
+  private getFamilyGainScale(sourceId: ChannelId) {
+    const endpointCount = Math.max(1, [...this.sourceIds.values()].filter((id) => id === sourceId).length);
+    return 1 / Math.sqrt(endpointCount);
+  }
+
+  private updateFamilyProgrammedGain(sourceId: ChannelId) {
+    if (!this.context) return;
+    const level = this.sources.get(sourceId)?.level ?? this.getOrCreateConfiguration(sourceId).level;
+    const gain = level / 100 * CHANNEL_GAIN_MAX * this.getFamilyGainScale(sourceId);
+    this.channels.forEach((endpoint) => { if (endpoint.sourceId === sourceId) this.smooth(endpoint.gain.gain, gain); });
+  }
+
   private smooth(parameter: AudioParamLike, value: number) {
     if (!this.context) return;
-    ramp(parameter, value, this.context.currentTime);
+    const safeValue = finiteNumber(value, 0);
+    ramp(parameter, safeValue, this.context.currentTime);
     this.diagnostics = { ...this.diagnostics, smoothingRamps: this.diagnostics.smoothingRamps + 1 };
   }
 
   private emit() {
     this.listeners.forEach((listener) => listener());
+  }
+
+  private handleSafetyMessage(data: unknown) {
+    if (!data || typeof data !== "object") return;
+    const report = data as Record<string, unknown>;
+    if (report.type !== "safety-meter") return;
+    const state = report.state;
+    if (state !== "NORMAL" && state !== "CAUTION" && state !== "LIMITING" && state !== "OVERLOAD" && state !== "SAFETY MUTE") return;
+    this.masterSafety = {
+      currentPeakDbfs: finiteNumber(report.currentPeakDbfs, Number.NEGATIVE_INFINITY),
+      peakHoldDbfs: finiteNumber(report.peakHoldDbfs, Number.NEGATIVE_INFINITY),
+      reductionDb: finiteNumber(report.reductionDb, state === "SAFETY MUTE" ? Number.NEGATIVE_INFINITY : 0),
+      inputPeakDbfs: finiteNumber(report.inputPeakDbfs, Number.NEGATIVE_INFINITY),
+      state,
+      muteReason: typeof report.muteReason === "string" ? report.muteReason : "",
+      available: true,
+      meterRateHz: OUTPUT_METER_RATE_HZ,
+    };
+    this.emitMasterSafety();
+  }
+
+  private emitMasterSafety() {
+    this.masterSafetyListeners.forEach((listener) => listener());
   }
 }
 

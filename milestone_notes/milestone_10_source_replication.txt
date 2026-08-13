@@ -1,0 +1,43 @@
+MILESTONE 10 — SOURCE CLONE + DUPLICATE SEMANTICS
+
+Implemented 2026-08-12.
+
+CLONE
+
+- A Clone is a new channel/output endpoint whose sourceId points to its root source.
+- The audio runtime owns one oscillator and source envelope per sourceId. Clone endpoints connect that shared envelope to independent programmed-gain, Live Trim, analyser, panner, routing and disposal branches.
+- Root frequency and programmed level changes therefore propagate immediately to every Clone readout and endpoint without oscillator reconstruction.
+- Clone routing, Sound Desk X/Y placement, pan, Live Trim, mute state and deletion are independent.
+- An unrouted Clone is smoothly gated to silence through its endpoint Live Trim stage.
+- Source identity and Channel Out destination identity are decoupled. Any source, Clone or Duplicate endpoint may connect to any free Channel Out; one endpoint may own only one visible Channel Out route.
+- The Clone Inspector exposes waveform, frequency and programmed level as inherited text only and explicitly says LOCKED — ADJUST AT SOURCE. It contains no source-programming inputs.
+
+DUPLICATE
+
+- A Duplicate receives a new stable channel/source identity and independent oscillator/runtime branch.
+- Frequency and programmed level are copied once at creation. Later edits diverge normally.
+- A Duplicate can become a root for its own Clone family.
+
+DELETE SAFETY
+
+- Clone Quick Delete removes only that endpoint.
+- A source with dependent Clones rejects reducer-level Quick Delete.
+- Explicit confirmation is required for DELETE SOURCE + ALL CLONES.
+- Confirmed cascade removal deletes only the root and its dependent Clone routes/state. Unrelated Duplicates and channels survive.
+
+FAN-OUT POLICY
+
+- Clone families use equal-power programmed-gain normalisation: each endpoint receives 1 / sqrt(endpoint count) of the source branch's normal programmed gain.
+- This preserves independent endpoint trim and pan while maintaining conservative shared-master headroom as a Clone family grows.
+- Normalisation never creates another oscillator, AudioContext, session gate or master.
+
+VERIFICATION
+
+- Model/runtime/render tests cover shared oscillator identity, inherited programming propagation, independent endpoint controls, Duplicate divergence, quick-delete scope, cascade protection and read-only Inspector structure.
+- Browser coverage verifies the Clone Inspector contains no frequency or programmed-level input, directs adjustment to the source, follows root frequency edits immediately and retains endpoint actions.
+- Existing transport, timer, routing, multi-channel audio, workspace navigation and accessibility journeys remain passing.
+
+MILESTONE BOUNDARY
+
+- The 25-cell Milestone 11 stress/failure-threshold exercise was not performed.
+- No processing-module, recording, looping, microphone, sample or Visualiser redesign work was added.
