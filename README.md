@@ -37,7 +37,7 @@ pnpm test
 - Sound Desk X-axis stereo placement and bounded relative Live Trim per plotted channel
 - Threads Monitor reports `SD MUTED` for a focused active route at -100% Live Trim instead of implying a missing signal
 - Shared Threads/Sound Desk/Visualiser Play/Pause/Stop transport paired to the elapsed session timer
-- Contextual Monitor readout with one analyser-derived composite waveform of every sounding routed channel
+- Contextual Monitor readout with one colour-coded analyser-derived trace per sounding routed endpoint
 - Shared session/master output separated from channel-owned audio resources
 - Session running/paused state and studio/compact layout switch
 - Responsive tablet and narrow-screen adaptations
@@ -52,7 +52,7 @@ pnpm test
 
 The approved repository baseline is Milestone 09. It includes verified multi-channel concurrency, channel-bound sine source placement/wiring, X-axis stereo placement, relative Live Trim, smoothed shared transport paired to the elapsed timer, composite sounding-channel Monitor waveform, and explicit Sound Desk mute status. Y audio, distance/depth/elevation, automatic distribution, Blend/processing semantics, arbitrary graph mixing, recording and sample playback remain unimplemented.
 
-The current local-only M10/M10.1 candidate adds Clone/Duplicate source semantics and a non-bypassable final sample-peak safety boundary. Its commissioning oscillator range is 50 Hz–10 kHz; this is not a safe-frequency claim. The compact Monitor reports measured post-protection sample peak in dBFS, peak hold, reduction and safety state. It does not report acoustic SPL or true peak. See `SAFE_LISTENING_CHARTER.md` and `milestone_notes/milestone_10_1_output_safety.txt`. This candidate is unapproved and must not be promoted until user acceptance.
+The current M10/M10.1/M11 review candidate has completed automated qualification and manual listening acceptance but remains repository-unapproved until conditional hard-save promotion succeeds. It adds Clone/Duplicate semantics and 25-position system qualification. The accepted listening configuration is `?audioDiagnostic=native-fence-scope`, using native Web Audio output compression/sample fencing and one layered analyser trace per sounding endpoint. The preserved custom AudioWorklet path and its master meter are not part of the accepted Safari listening configuration because testing exposed progressive latency. Final metering, non-finite latching and the eventual offline desktop audio boundary are deferred for a later decision. The 50 Hz–10 kHz commissioning range is not a safe-frequency claim; the native fence is not a true-peak or acoustic-SPL guarantee.
 
 ## Main editing surfaces
 

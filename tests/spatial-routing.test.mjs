@@ -54,6 +54,16 @@ test("Live Trim is channel-owned, bounded, and independent of programmed routing
   assert.equal(state.channels[1].assignment, null);
 });
 
+test("invalid Live Trim control data preserves the previous finite value", () => {
+  const channels = [createChannelDefinition(1)];
+  let state = createInitialSpatialRoutingState(channels);
+  state = spatialRoutingReducer(state, { type: "set-live-trim", channelId: "channel-01", value: 8 });
+  for (const value of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, undefined, null, "16"]) {
+    state = spatialRoutingReducer(state, { type: "set-live-trim", channelId: "channel-01", value });
+    assert.equal(state.channels[0].liveTrim, 8);
+  }
+});
+
 test("channel-owned assignments permit stacked routing without collision state", () => {
   const channels = [createChannelDefinition(1), createChannelDefinition(2)];
   let state = createInitialSpatialRoutingState(channels);

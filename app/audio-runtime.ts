@@ -1,5 +1,6 @@
 import type { ChannelId } from "./channel-routing";
 import type { ThreadChannel } from "./channel-routing";
+import { diagnosticMeterEnabled, getAudioDiagnosticMode } from "./audio-diagnostics.ts";
 
 export const AUDIO_FREQUENCY_MIN = 50;
 export const AUDIO_FREQUENCY_MAX = 10_000;
@@ -49,9 +50,12 @@ export type AudioRuntimeDiagnostics = Readonly<{
   safetyDisposals: number;
   finalAnalyserCreations: number;
   finalAnalyserDisposals: number;
+  knownSources: number;
+  runtimeListeners: number;
+  safetyListeners: number;
 }>;
 
-export type MasterSafetyState = "NORMAL" | "CAUTION" | "LIMITING" | "OVERLOAD" | "SAFETY MUTE";
+export type MasterSafetyState = "NORMAL" | "CAUTION" | "LIMITING" | "OVERLOAD" | "SAFETY MUTE" | "RESET REQUESTED";
 
 export type MasterSafetySnapshot = Readonly<{
   currentPeakDbfs: number;
@@ -80,7 +84,7 @@ type MessagePortLike = {
   postMessage(message: unknown): void;
   close?(): void;
 };
-type SafetyNodeLike = AudioNodeLike & { port: MessagePortLike };
+type SafetyNodeLike = AudioNodeLike & { input?: AudioNodeLike; port: MessagePortLike };
 
 type GainNodeLike = AudioNodeLike & { gain: AudioParamLike };
 type StereoPannerNodeLike = AudioNodeLike & { pan: AudioParamLike };
@@ -178,6 +182,32 @@ function browserAudioContextFactory(): AudioContextLike {
 
 async function browserSafetyNodeFactory(context: AudioContextLike): Promise<SafetyNodeLike> {
   const browserContext = context as AudioContext;
+  const diagnosticMode = getAudioDiagnosticMode();
+  if (diagnosticMode === "native-fence" || diagnosticMode === "native-fence-scope") {
+    const input = browserContext.createGain();
+    const compressor = browserContext.createDynamicsCompressor();
+    const fence = browserContext.createWaveShaper();
+    compressor.threshold.value = -9;
+    compressor.knee.value = 0;
+    compressor.ratio.value = 12;
+    compressor.attack.value = 0.003;
+    compressor.release.value = 0.12;
+    const ceiling = 10 ** (OUTPUT_SAFETY_CEILING_DBFS / 20);
+    fence.curve = Float32Array.from({ length: 65_537 }, (_, index) => {
+      const sample = index / 65_536 * 2 - 1;
+      return Math.max(-ceiling, Math.min(ceiling, sample));
+    });
+    fence.oversample = "none";
+    input.connect(compressor);
+    compressor.connect(fence);
+    const port: MessagePortLike = { onmessage: null, postMessage() {}, close() {} };
+    return {
+      input,
+      port,
+      connect(destination) { fence.connect(destination as unknown as AudioNode); return destination; },
+      disconnect() { input.disconnect(); compressor.disconnect(); fence.disconnect(); },
+    };
+  }
   if (!browserContext.audioWorklet || typeof globalThis.AudioWorkletNode === "undefined") {
     throw new Error("Required output safety processor is unavailable; audio remains disconnected");
   }
@@ -189,6 +219,10 @@ async function browserSafetyNodeFactory(context: AudioContextLike): Promise<Safe
     channelCount: 2,
     channelCountMode: "clamped-max",
     channelInterpretation: "speakers",
+    processorOptions: {
+      meterReportingEnabled: diagnosticMeterEnabled(diagnosticMode),
+      safetyMode: diagnosticMode === "minimal-fence" ? "minimal-fence" : "full",
+    },
   }) as unknown as SafetyNodeLike;
 }
 
@@ -209,6 +243,8 @@ export class ApplicationAudioRuntime {
   private failures = new Map<ChannelId, string>();
   private listeners = new Set<() => void>();
   private masterSafetyListeners = new Set<() => void>();
+  private safetyResetSequence = 0;
+  private pendingSafetyReset: number | null = null;
   private masterSafety: MasterSafetySnapshot = {
     currentPeakDbfs: Number.NEGATIVE_INFINITY,
     peakHoldDbfs: Number.NEGATIVE_INFINITY,
@@ -239,6 +275,9 @@ export class ApplicationAudioRuntime {
     safetyDisposals: 0,
     finalAnalyserCreations: 0,
     finalAnalyserDisposals: 0,
+    knownSources: 0,
+    runtimeListeners: 0,
+    safetyListeners: 0,
   };
 
   constructor(createContext: AudioContextFactory = browserAudioContextFactory, createSafetyNode: SafetyNodeFactory = browserSafetyNodeFactory) {
@@ -287,7 +326,12 @@ export class ApplicationAudioRuntime {
   }
 
   getDiagnostics() {
-    return { ...this.diagnostics };
+    return {
+      ...this.diagnostics,
+      knownSources: this.sources.size,
+      runtimeListeners: this.listeners.size,
+      safetyListeners: this.masterSafetyListeners.size,
+    };
   }
 
   getMasterSafetySnapshot() {
@@ -296,8 +340,10 @@ export class ApplicationAudioRuntime {
 
   resetSafetyMute() {
     if (this.masterSafety.state !== "SAFETY MUTE") return;
-    this.safetyNode?.port.postMessage({ type: "reset-safety-mute" });
-    this.masterSafety = { ...this.masterSafety, state: "NORMAL", muteReason: "", reductionDb: 0 };
+    const requestId = ++this.safetyResetSequence;
+    this.pendingSafetyReset = requestId;
+    this.safetyNode?.port.postMessage({ type: "reset-safety-mute", requestId });
+    this.masterSafety = { ...this.masterSafety, state: "RESET REQUESTED", muteReason: "AWAITING AUDIO ENGINE CONFIRMATION" };
     this.emitMasterSafety();
   }
 
@@ -526,7 +572,12 @@ export class ApplicationAudioRuntime {
     this.configurations.delete(channelId);
     this.failures.delete(channelId);
     this.sourceIds.delete(channelId);
-    this.updateFamilyProgrammedGain(channel.sourceId);
+    const familyRemains = [...this.channels.values()].some((endpoint) => endpoint.sourceId === channel.sourceId);
+    if (familyRemains) this.updateFamilyProgrammedGain(channel.sourceId);
+    else {
+      this.sources.delete(channel.sourceId);
+      this.configurations.delete(channel.sourceId);
+    }
     this.diagnostics = {
       ...this.diagnostics,
       channelDisposals: this.diagnostics.channelDisposals + 1,
@@ -555,8 +606,9 @@ export class ApplicationAudioRuntime {
     const hadSafetyNode = Boolean(this.safetyNode);
     const hadFinalAnalyser = Boolean(this.finalAnalyser);
     for (const channelId of [...this.channels.keys()]) this.disposeChannel(channelId);
-    await this.context?.close();
+    if (this.safetyNode) this.safetyNode.port.onmessage = null;
     this.safetyNode?.port.close?.();
+    await this.context?.close();
     this.safetyNode?.disconnect();
     this.finalAnalyser?.disconnect();
     this.context = null;
@@ -568,6 +620,7 @@ export class ApplicationAudioRuntime {
     this.sources.clear();
     this.sourceIds.clear();
     this.sessionPlaybackState = "playing";
+    this.pendingSafetyReset = null;
     this.masterSafety = { ...this.masterSafety, currentPeakDbfs: Number.NEGATIVE_INFINITY, peakHoldDbfs: Number.NEGATIVE_INFINITY, reductionDb: 0, inputPeakDbfs: Number.NEGATIVE_INFINITY, state: "NORMAL", muteReason: "", available: false };
     this.diagnostics = {
       ...this.diagnostics,
@@ -595,7 +648,7 @@ export class ApplicationAudioRuntime {
         finalAnalyser.fftSize = 1024;
         finalAnalyser.smoothingTimeConstant = 0;
         sessionGate.connect(master);
-        master.connect(safetyNode);
+        master.connect(safetyNode.input ?? safetyNode);
         safetyNode.connect(finalAnalyser);
         finalAnalyser.connect(context.destination);
         safetyNode.port.onmessage = (event) => this.handleSafetyMessage(event.data);
@@ -697,6 +750,11 @@ export class ApplicationAudioRuntime {
     if (report.type !== "safety-meter") return;
     const state = report.state;
     if (state !== "NORMAL" && state !== "CAUTION" && state !== "LIMITING" && state !== "OVERLOAD" && state !== "SAFETY MUTE") return;
+    const resetRequestId = finiteNumber(report.resetRequestId, 0);
+    if (this.pendingSafetyReset !== null) {
+      if (resetRequestId !== this.pendingSafetyReset) return;
+      this.pendingSafetyReset = null;
+    }
     this.masterSafety = {
       currentPeakDbfs: finiteNumber(report.currentPeakDbfs, Number.NEGATIVE_INFINITY),
       peakHoldDbfs: finiteNumber(report.peakHoldDbfs, Number.NEGATIVE_INFINITY),

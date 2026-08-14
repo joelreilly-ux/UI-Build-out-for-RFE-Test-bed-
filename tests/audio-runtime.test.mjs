@@ -178,6 +178,9 @@ test("five channels coexist through one context and master with isolated paramet
     safetyDisposals: 0,
     finalAnalyserCreations: 1,
     finalAnalyserDisposals: 0,
+    knownSources: 5,
+    runtimeListeners: 0,
+    safetyListeners: 0,
   });
   assert.deepEqual(channelIds.map((channelId) => runtime.getChannelSnapshot(channelId).frequency), [78, 110, 156, 221, 312]);
   assert.equal(contexts[0].oscillators[0].connections[0], contexts[0].gains[4]);
@@ -457,7 +460,13 @@ test("master safety reports are measured engine state and safety mute recovery i
   safetyNodes[0].port.emit({ type: "safety-meter", currentPeakDbfs: -Infinity, peakHoldDbfs: -7.1, reductionDb: -Infinity, inputPeakDbfs: -Infinity, state: "SAFETY MUTE", muteReason: "NON-FINITE AUDIO SAMPLE" });
   assert.equal(runtime.getMasterSafetySnapshot().state, "SAFETY MUTE");
   runtime.resetSafetyMute();
-  assert.deepEqual(safetyNodes[0].port.messages.at(-1), { type: "reset-safety-mute" });
+  const resetMessage = safetyNodes[0].port.messages.at(-1);
+  assert.equal(resetMessage.type, "reset-safety-mute");
+  assert.equal(Number.isInteger(resetMessage.requestId), true);
+  assert.equal(runtime.getMasterSafetySnapshot().state, "RESET REQUESTED");
+  safetyNodes[0].port.emit({ type: "safety-meter", currentPeakDbfs: -Infinity, peakHoldDbfs: -Infinity, reductionDb: 0, inputPeakDbfs: -Infinity, state: "NORMAL", muteReason: "" });
+  assert.equal(runtime.getMasterSafetySnapshot().state, "RESET REQUESTED");
+  safetyNodes[0].port.emit({ type: "safety-meter", currentPeakDbfs: -Infinity, peakHoldDbfs: -Infinity, reductionDb: 0, inputPeakDbfs: -Infinity, state: "NORMAL", muteReason: "", resetRequestId: resetMessage.requestId });
   assert.equal(runtime.getMasterSafetySnapshot().state, "NORMAL");
   unsubscribeChannel();
   unsubscribeMeter();

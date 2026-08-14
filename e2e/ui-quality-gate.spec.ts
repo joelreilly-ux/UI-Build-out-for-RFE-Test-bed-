@@ -316,8 +316,8 @@ test("Threads outputs drive the Sound Desk Plotter and Visualiser inspection", a
 
   await page.getByRole("button", { name: "Go to Sound Desk" }).click();
   await page.getByRole("button", { name: "Go to Threads" }).click();
-  page.once("dialog", (dialog) => dialog.accept());
   await page.getByRole("button", { name: "Remove CH 02" }).click();
+  await page.getByRole("button", { name: "REMOVE CH 02", exact: true }).click();
   await expect(page.getByLabel("CH 02 output complete")).toHaveCount(0);
   await page.getByRole("button", { name: "Go to Sound Desk" }).click();
   await expect(page.getByRole("button", { name: /CH 02/ })).toHaveCount(0);
@@ -387,7 +387,7 @@ test("Inputs, workspace tools, and Monitor expand context without losing constru
   await moduleCard(page, "length").locator(".module-body").click();
   await expect(page.getByRole("status", { name: "Selection monitor" })).toContainText("NOTE LENGTH");
   await expect(page.getByRole("status", { name: "Selection monitor" })).toContainText("CH 01 / 01");
-  await expect(page.getByLabel("Combined signal monitor idle; no sounding channels")).toContainText("NO SIGNAL");
+  await expect(page.getByLabel("Layered signal monitor idle; no sounding channels")).toContainText("NO SIGNAL");
 
   await page.getByRole("button", { name: "Collapse Inputs and Channels" }).click();
   await expect(page.getByRole("button", { name: "Expand Inputs and Channels" })).toBeVisible();
@@ -417,9 +417,9 @@ test("many channels remain readable, scrollable, and removable", async ({ page }
   expect(await fixtures.first().evaluate((fixture) => fixture.getBoundingClientRect().height)).toBeGreaterThan(42);
   expect(await fixtures.last().evaluate((fixture) => fixture.getBoundingClientRect().height)).toBeGreaterThanOrEqual(42);
 
-  page.once("dialog", (dialog) => dialog.accept());
   await page.getByRole("button", { name: "Remove CH 24" }).scrollIntoViewIfNeeded();
   await page.getByRole("button", { name: "Remove CH 24" }).click();
+  await page.getByRole("button", { name: "REMOVE CH 24", exact: true }).click();
   await expect(fixtures).toHaveCount(23);
   await expect(page.getByRole("button", { name: "Remove CH 24" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Remove CH 23" })).toBeVisible();
@@ -430,9 +430,9 @@ test("channel numbering resets after the final active channel is removed", async
   await page.getByRole("button", { name: "ADD CHANNEL" }).click();
   await expect(page.getByRole("button", { name: "Remove CH 03" })).toBeVisible();
 
-  page.on("dialog", (dialog) => void dialog.accept());
   for (const label of ["CH 01", "CH 02", "CH 03"]) {
     await page.getByRole("button", { name: `Remove ${label}` }).click();
+    await page.getByRole("button", { name: `REMOVE ${label}`, exact: true }).click();
     await expect(page.getByRole("button", { name: `Remove ${label}` })).toHaveCount(0);
   }
 
@@ -440,6 +440,29 @@ test("channel numbering resets after the final active channel is removed", async
   await page.getByRole("button", { name: "ADD CHANNEL" }).click();
   await expect(page.getByRole("button", { name: "Remove CH 01" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Remove CH 04" })).toHaveCount(0);
+});
+
+test("channel removal warning remains non-blocking and preserves unrelated playback", async ({ page }) => {
+  await page.goto("/?audioDiagnostic=native-fence");
+  await page.getByRole("button", { name: "ADD CHANNEL" }).click();
+  await page.getByRole("button", { name: "CH 01 start sine signal" }).click();
+  await page.getByRole("button", { name: "Play session" }).click();
+  const audioState = () => page.evaluate(() => {
+    const runtime = (window as typeof window & { __rfeAudioRuntime: { getActiveChannelIds(): string[]; getSessionPlaybackState(): string } }).__rfeAudioRuntime;
+    return { activeIds: runtime.getActiveChannelIds(), playback: runtime.getSessionPlaybackState() };
+  });
+  await expect.poll(audioState).toEqual({ activeIds: ["channel-01"], playback: "playing" });
+
+  await page.getByRole("button", { name: "Remove CH 02" }).click();
+  await expect(page.getByRole("alert")).toContainText("Other sounding channels remain uninterrupted");
+  await expect.poll(audioState).toEqual({ activeIds: ["channel-01"], playback: "playing" });
+  await page.getByRole("button", { name: "CANCEL", exact: true }).click();
+  await expect.poll(audioState).toEqual({ activeIds: ["channel-01"], playback: "playing" });
+
+  await page.getByRole("button", { name: "Remove CH 02" }).click();
+  await page.getByRole("button", { name: "REMOVE CH 02", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Remove CH 02" })).toHaveCount(0);
+  await expect.poll(audioState).toEqual({ activeIds: ["channel-01"], playback: "playing" });
 });
 
 test("CH 01 audio keeps one shared master while source lifecycle remains channel-scoped", async ({ page }) => {
@@ -450,7 +473,7 @@ test("CH 01 audio keeps one shared master while source lifecycle remains channel
   await expect.poll(() => page.evaluate(() => Boolean((window as typeof window & { __rfeAudioRuntime?: unknown }).__rfeAudioRuntime))).toBe(true);
 
   await expect(page.getByRole("button", { name: "CH 01 start sine signal" })).toBeVisible();
-  await expect(page.getByLabel("Combined signal monitor idle; no sounding channels")).toContainText("NO SIGNAL");
+  await expect(page.getByLabel("Layered signal monitor idle; no sounding channels")).toContainText("NO SIGNAL");
   expect((await diagnostics()).masterCreations).toBe(0);
 
   await page.getByRole("slider", { name: "CH 01 sine frequency" }).fill("156");
@@ -461,7 +484,7 @@ test("CH 01 audio keeps one shared master while source lifecycle remains channel
   await expect(monitor).toContainText("SINE");
   await expect(monitor).toContainText("156 Hz · LEVEL 10%");
   await expect(monitor).toContainText("ACTIVE · CENTRED OUTPUT");
-  await expect(page.getByLabel("Combined signal monitor active with 1 sounding channel")).toContainText("FINAL OUTPUT · 1 PATH");
+  await expect(page.getByLabel("Layered signal monitor active with 1 sounding channel")).toContainText("LAYERED VIEW · 1 TRACE");
   await expect(page.getByLabel("Master safety meter")).toContainText("dBFS");
   await expect(page.getByLabel("Master safety meter")).toContainText("NORMAL");
   await expect.poll(() => page.evaluate(() => {
@@ -489,7 +512,7 @@ test("CH 01 audio keeps one shared master while source lifecycle remains channel
   expect(await diagnostics()).toMatchObject({ masterCreations: 1, channelCreations: 1, sourceCreations: 1, activeSources: 1 });
 
   await page.getByRole("button", { name: "CH 01 stop sine signal" }).click();
-  await expect(page.getByLabel("Combined signal monitor idle; no sounding channels")).toContainText("NO SIGNAL");
+  await expect(page.getByLabel("Layered signal monitor idle; no sounding channels")).toContainText("NO SIGNAL");
   await expect.poll(async () => (await diagnostics()).activeSources).toBe(0);
   await page.getByRole("button", { name: "CH 01 start sine signal" }).click();
   await expect.poll(async () => (await diagnostics()).sourceCreations).toBe(2);
@@ -535,7 +558,7 @@ test("five dynamic sine channels remain isolated through control, deletion, Moni
     await expect(monitor).toContainText(`${label} / 05`);
     await expect(monitor).toContainText(`${frequency} Hz · LEVEL ${level}%`);
     // Only the default CH 01 is connected to Channel Out in this isolation fixture.
-    await expect(page.getByLabel("Combined signal monitor active with 1 sounding channel")).toContainText("FINAL OUTPUT · 1 PATH");
+    await expect(page.getByLabel("Layered signal monitor active with 1 sounding channel")).toContainText("LAYERED VIEW · 1 TRACE");
   }
   expect((await diagnostics()).sourceCreations).toBe(5);
 
@@ -546,8 +569,8 @@ test("five dynamic sine channels remain isolated through control, deletion, Moni
   await expect.poll(async () => (await diagnostics()).activeSources).toBe(5);
   expect(await diagnostics()).toMatchObject({ masterCreations: 1, sourceCreations: 6, activeSources: 5 });
 
-  page.once("dialog", (dialog) => dialog.accept());
   await page.getByRole("button", { name: "Remove CH 02" }).click();
+  await page.getByRole("button", { name: "REMOVE CH 02", exact: true }).click();
   await expect.poll(async () => (await diagnostics()).activeSources).toBe(4);
   await expect(page.getByRole("button", { name: "Remove CH 02" })).toHaveCount(0);
   expect(await diagnostics()).toMatchObject({ masterCreations: 1, channelDisposals: 1, analyserDisposals: 1, activeChannels: 4, activeSources: 4 });
@@ -611,7 +634,7 @@ test("Sound Desk pan and Live Trim feed one smoothed session gate controlled by 
   const monitor = page.getByRole("status", { name: "Selection monitor" });
   await expect(monitor).toContainText("SD MUTED");
   await expect(monitor).toContainText("SOUND DESK LIVE TRIM -100%");
-  await expect(page.getByLabel("Combined signal monitor idle; focused channel Sound Desk muted")).toContainText("SD MUTED");
+  await expect(page.getByLabel("Layered signal monitor idle; focused channel Sound Desk muted")).toContainText("SD MUTED");
   await expect(page.getByRole("slider", { name: "CH 01 level" })).toHaveValue("20");
   await page.getByRole("button", { name: "Go to Sound Desk" }).click();
   await page.getByRole("button", { name: "Reset CH 01 Live Trim to 0" }).click();
@@ -682,6 +705,8 @@ test("Clone Inspector keeps shared source programming read-only and follows root
     const runtime = (window as typeof window & { __rfeAudioRuntime: { getSoundingChannelIds(): string[] } }).__rfeAudioRuntime;
     return runtime.getSoundingChannelIds().sort();
   })).toEqual(["channel-01", "channel-02"]);
+  await expect(page.getByLabel("Layered signal monitor active with 2 sounding channels")).toHaveAttribute("data-trace-count", "2");
+  await expect(page.getByLabel("Layered signal monitor active with 2 sounding channels")).toContainText("LAYERED VIEW · 2 TRACES");
   await page.locator('[data-module-id^="sine-clone-channel-02"] .module-body').click();
   await expect(inspector.getByText("70 Hz", { exact: true })).toBeVisible();
   await expect(inspector.getByText("LEVEL 20%", { exact: true })).toBeVisible();
@@ -722,4 +747,170 @@ test("a source can mix and match with any free Channel Out", async ({ page }) =>
   await page.getByRole("button", { name: "Go to Sound Desk" }).click();
   await expect(page.getByRole("button", { name: "CH 02 · complete and routable" })).toBeEnabled();
   await expect(page.getByRole("button", { name: "CH 01 · incomplete" })).toBeDisabled();
+});
+
+test("M11 dense 25-position qualification keeps routing, transport, Monitor, Clone, and Duplicate truth", async ({ page }) => {
+  test.setTimeout(240_000);
+  const consoleErrors: string[] = [];
+  const pageErrors: string[] = [];
+  page.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text()); });
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+
+  for (let count = 1; count < 17; count += 1) await page.getByRole("button", { name: "ADD CHANNEL" }).click();
+  const frequencies = [50, 53, 56, 78, 110, 220, 221, 330, 440, 441, 550, 880, 1_000, 1_750, 3_500, 6_600, 10_000];
+  for (let sequence = 1; sequence <= 17; sequence += 1) {
+    const label = `CH ${String(sequence).padStart(2, "0")}`;
+    await page.getByRole("slider", { name: `${label} sine frequency` }).fill(String(frequencies[sequence - 1]));
+    await page.getByRole("slider", { name: `${label} level` }).fill("2");
+    await page.getByRole("button", { name: `Place ${label} sine source in Threads` }).click();
+    if (sequence > 1) {
+      const source = page.locator(`[data-module-id^="sine-source-channel-${String(sequence).padStart(2, "0")}"]`);
+      await source.getByRole("button", { name: `Output port for ${label} Sine` }).click();
+      await page.getByRole("button", { name: `${label} output terminal incomplete` }).click();
+    }
+  }
+
+  const rootOne = page.locator('[data-module-id^="sine-source-channel-01"]');
+  for (let clone = 0; clone < 4; clone += 1) {
+    await rootOne.locator(".module-body").evaluate((element: HTMLElement) => element.click());
+    await page.getByRole("button", { name: "Clone", exact: true }).click();
+  }
+  const rootTwo = page.locator('[data-module-id^="sine-source-channel-02"]');
+  for (let duplicate = 0; duplicate < 4; duplicate += 1) {
+    await rootTwo.locator(".module-body").evaluate((element: HTMLElement) => element.click());
+    await page.getByRole("button", { name: "Duplicate", exact: true }).click();
+  }
+  await expect(page.locator('[data-module-type="sine-source"]')).toHaveCount(25);
+
+  for (let sequence = 18; sequence <= 25; sequence += 1) {
+    const label = `CH ${String(sequence).padStart(2, "0")}`;
+    const title = sequence <= 21 ? `${label} Clone` : `${label} Sine`;
+    const source = page.locator(`[data-module-id^="sine-${sequence <= 21 ? "clone" : "source"}-channel-${String(sequence).padStart(2, "0")}"]`);
+    await source.getByRole("button", { name: `Output port for ${title}` }).evaluate((element: HTMLElement) => element.click());
+    await page.getByRole("button", { name: `${label} output terminal incomplete` }).click();
+  }
+
+  const startSequences = [...Array.from({ length: 17 }, (_, index) => index + 1), 22, 23, 24, 25];
+  for (const sequence of startSequences) {
+    const label = `CH ${String(sequence).padStart(2, "0")}`;
+    const source = page.locator(`[data-module-id^="sine-source-channel-${String(sequence).padStart(2, "0")}"]`);
+    await source.locator(".module-body").evaluate((element: HTMLElement) => element.click());
+    await page.getByRole("button", { name: `${label} start sine signal` }).click();
+    await expect(page.getByRole("button", { name: `${label} stop sine signal` })).toBeVisible();
+  }
+
+  await expect.poll(() => page.evaluate(() => {
+    const runtime = (window as typeof window & { __rfeAudioRuntime: { getDiagnostics(): { activeChannels: number; activeSources: number; contextCreations: number; masterCreations: number; safetyCreations: number }; getActiveChannelIds(): string[]; getSoundingChannelIds(): string[] } }).__rfeAudioRuntime;
+    return { ...runtime.getDiagnostics(), activeEndpoints: runtime.getActiveChannelIds().length, soundingEndpoints: runtime.getSoundingChannelIds().length };
+  }), { timeout: 20_000 }).toMatchObject({ activeChannels: 25, activeSources: 21, activeEndpoints: 25, soundingEndpoints: 25, contextCreations: 1, masterCreations: 1, safetyCreations: 1 });
+
+  await page.getByRole("button", { name: "Go to Sound Desk" }).click();
+  const coordinates = [
+    "-2,2", "-1,2", "0,2", "1,2", "2,2", "-2,1", "-1,1", "0,1", "1,1", "2,1",
+    "-2,0", "-1,0", "0,0", "1,0", "2,0", "-2,-1", "-1,-1", "0,-1", "1,-1", "2,-1",
+    "-2,-2", "-1,-2", "0,-2", "1,-2", "2,-2",
+  ];
+  for (let sequence = 1; sequence <= 25; sequence += 1) {
+    const label = `CH ${String(sequence).padStart(2, "0")}`;
+    await page.getByRole("button", { name: `${label} · complete and routable` }).click();
+    await page.getByRole("grid", { name: "Sound Desk shared 5 by 5 spatial grid" }).locator(`[data-coordinate="${coordinates[sequence - 1]}"]`).click();
+    await page.getByRole("button", { name: "Plot route" }).click();
+  }
+  await expect(page.locator(".spatial-channel-node")).toHaveCount(25);
+
+  for (const [first, second] of [[1, 2], [18, 19], [22, 23]]) {
+    for (const [sequence, coordinate] of [[first, coordinates[second - 1]], [second, coordinates[first - 1]]]) {
+      const label = `CH ${String(sequence).padStart(2, "0")}`;
+      await page.getByRole("button", { name: `${label} · complete and routable` }).click();
+      await page.getByRole("grid", { name: "Sound Desk shared 5 by 5 spatial grid" }).locator(`[data-coordinate="${coordinate}"]`).click();
+      await page.getByRole("button", { name: "Plot route" }).click();
+    }
+  }
+  await expect(page.locator(".spatial-channel-node")).toHaveCount(25);
+
+  const sourceCreations = await page.evaluate(() => (window as typeof window & { __rfeAudioRuntime: { getDiagnostics(): { sourceCreations: number } } }).__rfeAudioRuntime.getDiagnostics().sourceCreations);
+  for (let cycle = 0; cycle < 12; cycle += 1) {
+    const transportName = cycle % 3 === 0 ? "Pause session" : cycle % 3 === 1 ? /^(Play|Resume) session$/ : "Stop session";
+    await page.getByRole("button", { name: transportName }).click();
+  }
+  await page.getByRole("button", { name: "Play session" }).click();
+  expect(await page.evaluate(() => (window as typeof window & { __rfeAudioRuntime: { getDiagnostics(): { sourceCreations: number; contextCreations: number; safetyCreations: number } } }).__rfeAudioRuntime.getDiagnostics())).toMatchObject({ sourceCreations, contextCreations: 1, safetyCreations: 1 });
+
+  await page.getByRole("button", { name: "Go to Threads" }).click();
+  for (const sequence of [18, 22, 3]) {
+    const label = `CH ${String(sequence).padStart(2, "0")}`;
+    await page.getByRole("button", { name: `Disconnect ${label} output` }).click();
+    await expect.poll(() => page.evaluate((channelId) => !(window as typeof window & { __rfeAudioRuntime: { getSoundingChannelIds(): string[] } }).__rfeAudioRuntime.getSoundingChannelIds().includes(channelId), `channel-${String(sequence).padStart(2, "0")}`)).toBe(true);
+  }
+  for (const sequence of [3, 22, 18]) {
+    const label = `CH ${String(sequence).padStart(2, "0")}`;
+    const type = sequence === 18 ? "clone" : "source";
+    const title = sequence === 18 ? `${label} Clone` : `${label} Sine`;
+    const source = page.locator(`[data-module-id^="sine-${type}-channel-${String(sequence).padStart(2, "0")}"]`);
+    await source.getByRole("button", { name: `Output port for ${title}` }).evaluate((element: HTMLElement) => element.click());
+    await page.getByRole("button", { name: `${label} output terminal incomplete` }).click();
+  }
+  await expect.poll(() => page.evaluate(() => (window as typeof window & { __rfeAudioRuntime: { getSoundingChannelIds(): string[] } }).__rfeAudioRuntime.getSoundingChannelIds().length)).toBe(25);
+  await expect(page.getByLabel("Layered signal monitor active with 25 sounding channels")).toContainText("LAYERED VIEW · 25 TRACES");
+  await expect(page.getByLabel("Layered signal monitor active with 25 sounding channels")).toHaveAttribute("data-trace-count", "25");
+  await expect(page.locator(".signal-monitor canvas")).toHaveCount(1);
+  await expect(page.getByLabel("Master safety meter")).toContainText("dBFS");
+  await page.evaluate(() => {
+    const deadline = performance.now() + 200;
+    while (performance.now() < deadline) Math.sqrt(123_456.789);
+  });
+  await expect.poll(() => page.evaluate(() => {
+    const runtime = (window as typeof window & { __rfeAudioRuntime: { getDiagnostics(): { safetyListeners: number }; getMasterSafetySnapshot(): { available: boolean; currentPeakDbfs: number; state: string } } }).__rfeAudioRuntime;
+    const safety = runtime.getMasterSafetySnapshot();
+    return safety.available && Number.isFinite(safety.currentPeakDbfs) && safety.state !== "SAFETY MUTE" && runtime.getDiagnostics().safetyListeners === 1;
+  })).toBe(true);
+  expect(consoleErrors).toEqual([]);
+  expect(pageErrors).toEqual([]);
+});
+
+test("audio reduction modes visibly remove only diagnostic observation layers", async ({ page }) => {
+  await page.goto("/?audioDiagnostic=no-observers");
+  await expect(page.getByText("TRACE OFF", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("Master safety meter")).toContainText("REPORT OFF");
+  await expect(page.getByLabel("Master safety meter")).toContainText("AUDIO-THREAD PROTECTION RETAINED");
+
+  await page.goto("/?audioDiagnostic=no-scope");
+  await expect(page.getByText("TRACE OFF", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("Master safety meter")).not.toContainText("REPORT OFF");
+
+  await page.goto("/?audioDiagnostic=no-meter");
+  await expect(page.getByText("TRACE OFF", { exact: true })).toHaveCount(0);
+  await expect(page.getByLabel("Master safety meter")).toContainText("REPORT OFF");
+
+  await page.goto("/?audioDiagnostic=minimal-fence");
+  await expect(page.getByText("TRACE OFF", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("Master safety meter")).toContainText("REPORT OFF");
+
+  await page.goto("/?audioDiagnostic=native-fence");
+  await expect(page.getByText("TRACE OFF", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("Master safety meter")).toContainText("REPORT OFF");
+
+  await page.goto("/?audioDiagnostic=native-fence-scope");
+  await expect(page.getByText("TRACE OFF", { exact: true })).toHaveCount(0);
+  await expect(page.locator(".signal-monitor canvas")).toHaveCount(1);
+  await expect(page.getByLabel("Master safety meter")).toContainText("REPORT OFF");
+  const nativeFencePeak = await page.evaluate(async () => {
+    const context = new OfflineAudioContext(1, 1_024, 48_000);
+    const source = context.createConstantSource();
+    source.offset.value = 8;
+    const compressor = context.createDynamicsCompressor();
+    compressor.threshold.value = -9;
+    compressor.knee.value = 0;
+    compressor.ratio.value = 12;
+    compressor.attack.value = 0.003;
+    compressor.release.value = 0.12;
+    const fence = context.createWaveShaper();
+    const ceiling = 10 ** (-6 / 20);
+    fence.curve = Float32Array.from({ length: 65_537 }, (_, index) => Math.max(-ceiling, Math.min(ceiling, index / 65_536 * 2 - 1)));
+    source.connect(compressor).connect(fence).connect(context.destination);
+    source.start();
+    const rendered = await context.startRendering();
+    return Math.max(...rendered.getChannelData(0).map(Math.abs));
+  });
+  expect(nativeFencePeak).toBeLessThanOrEqual(10 ** (-6 / 20) + 1e-6);
 });

@@ -36,6 +36,11 @@ test("known digital sums are measured from resulting samples rather than control
   assert.ok(Math.abs(measureSamplePeakDbfs([summed]) - -6.0205999) < 0.001);
 });
 
+test("stereo sample peak uses the hottest output channel rather than averaging channels", () => {
+  assert.ok(Math.abs(measureSamplePeakDbfs([Float32Array.of(0.05), Float32Array.of(0.5)]) - -6.0205999) < tolerance);
+  assert.ok(Math.abs(measureSamplePeakDbfs([Float32Array.of(-0.75), Float32Array.of(0.01)]) - linearToDbfs(0.75)) < tolerance);
+});
+
 test("sample limiter bounds final output at the configured -6 dBFS fence", () => {
   const core = new OutputSafetyCore(48_000);
   const destination = output(256);
@@ -46,6 +51,31 @@ test("sample limiter bounds final output at the configured -6 dBFS fence", () =>
   assert.equal(core.state, "OVERLOAD");
   assert.ok(core.reductionDb < 0);
 });
+
+for (const multiplier of [10, 100]) {
+  test(`sustained ${multiplier}x finite overload remains bounded, finite, and recovers`, () => {
+    const core = new OutputSafetyCore(48_000);
+    const blockSize = 128;
+    let maximumOutput = 0;
+    for (let block = 0; block < 48_000 * 5 / blockSize; block += 1) {
+      const input = [new Float32Array(blockSize).fill(multiplier), new Float32Array(blockSize).fill(-multiplier * 0.8)];
+      const destination = [new Float32Array(blockSize), new Float32Array(blockSize)];
+      core.process(input, destination);
+      maximumOutput = Math.max(maximumOutput, ...destination.flatMap((channel) => [...channel].map(Math.abs)));
+      assert.equal(destination.every((channel) => channel.every(Number.isFinite)), true);
+      assert.equal(Number.isFinite(core.currentGain), true);
+      assert.equal(Number.isFinite(core.reductionDb), true);
+      assert.equal(core.state, "OVERLOAD");
+    }
+    assert.ok(linearToDbfs(maximumOutput) <= OUTPUT_SAFETY_POLICY.ceilingDbfs + tolerance);
+    const silence = mono(new Array(blockSize).fill(0));
+    for (let block = 0; block < 48_000 * 2 / blockSize; block += 1) core.process(silence, output(blockSize));
+    assert.ok(core.currentGain > 0.999);
+    assert.ok(Math.abs(core.reductionDb) < 0.001);
+    assert.equal(core.state, "NORMAL");
+    assert.equal(core.safetyMuted, false);
+  });
+}
 
 test("non-finite audio latches fail-closed safety mute until deliberate reset", () => {
   const core = new OutputSafetyCore(48_000);

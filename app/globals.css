@@ -396,6 +396,12 @@ button:disabled, input:disabled, select:disabled { cursor: not-allowed; opacity:
 .channel-select small { overflow: hidden; color: var(--text-dim); font: 5px var(--font-mono); white-space: nowrap; text-overflow: ellipsis; }
 .channel-remove { min-width: 28px; min-height: 42px; padding: 0; border: 0; border-left: 1px solid var(--border); background: transparent; color: var(--text-dim); cursor: pointer; }
 .channel-remove:hover, .channel-remove:focus-visible { color: var(--warning); background: color-mix(in srgb, var(--warning) 7%, transparent); }
+.channel-remove-confirmation { display: grid; gap: 7px; padding: 9px; border-top: 1px solid color-mix(in srgb, var(--warning) 55%, var(--border)); background: color-mix(in srgb, var(--warning) 7%, var(--canvas)); }
+.channel-remove-confirmation strong { color: var(--warning); font: 700 7px var(--font-mono); letter-spacing: .08em; }
+.channel-remove-confirmation p { margin: 0; color: var(--text-dim); font-size: 7px; line-height: 1.45; }
+.channel-remove-confirmation > div { display: grid; grid-template-columns: minmax(70px, .65fr) minmax(0, 1.35fr); gap: 6px; }
+.channel-remove-confirmation button { min-height: 29px; border: 1px solid var(--border-strong); background: var(--control-surface-color); color: var(--text); font: 700 7px var(--font-mono); cursor: pointer; }
+.channel-remove-confirmation button.danger { color: var(--warning); border-color: color-mix(in srgb, var(--warning) 55%, var(--border)); }
 .audio-test-controls { display: grid; grid-template-columns: 1fr 58px; gap: 9px; padding: 9px; border-top: 1px solid var(--border); background: color-mix(in srgb, var(--canvas) 62%, var(--control-surface-color)); }
 .audio-state-line { grid-column: 1 / -1; min-width: 0; display: grid; grid-template-columns: 7px auto minmax(0, 1fr); align-items: center; gap: 5px; color: var(--text-soft); }
 .audio-state-line > span { width: 6px; height: 6px; border-radius: 50%; background: var(--text-dim); }
@@ -614,7 +620,7 @@ button:disabled, input:disabled, select:disabled { cursor: not-allowed; opacity:
 .thread-e { width: 16%; left: 51%; top: 42%; transform: rotate(16deg); }.thread-f { width: 16%; left: 46%; top: 73%; }
 .thread-g { width: 20%; left: 18%; top: 73%; transform: rotate(28deg); }.thread-h { width: 22%; left: 47%; top: 91%; transform: rotate(-32deg); }
 .thread.dashed { height: 0; background: none; border-top: var(--thread-width) dashed var(--thread-color); box-shadow: none; filter: drop-shadow(0 0 var(--thread-outline-width) var(--thread-outline-color)); }
-.canvas-key { position: absolute; bottom: 11px; right: 12px; z-index: 3; display: flex; gap: 12px; color: var(--text-dim); font-size: 7px; padding: 6px 8px; background: var(--control-surface-color); border: 1px solid var(--border); border-radius: var(--radius-control); }
+.canvas-key { position: absolute; bottom: 11px; right: 12px; z-index: 3; display: flex; gap: 12px; color: var(--text-dim); font-size: 7px; padding: 6px 8px; background: var(--control-surface-color); border: 1px solid var(--border); border-radius: var(--radius-control); pointer-events: none; }
 .canvas-key span { display: flex; align-items: center; gap: 5px; }.canvas-key i { width: 11px; height: 1px; background: var(--accent); }.canvas-key .key-future { border-top: 1px dashed var(--accent); background: none; }
 .empty-workspace { position: absolute; inset: 0; z-index: 2; display: grid; place-content: center; gap: 5px; text-align: center; pointer-events: none; color: var(--text-dim); }
 .empty-workspace strong { color: var(--text-soft); font-size: 11px; }

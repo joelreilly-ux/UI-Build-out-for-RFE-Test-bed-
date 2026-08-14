@@ -1,0 +1,109 @@
+MILESTONE 11 — SYSTEM QUALIFICATION, FAILURE-MODE TESTING + STRESS AUDIT
+
+STATUS
+
+Manual candidate acceptance completed on 2026-08-13 after automated qualification and conservative Safari listening/interaction testing. The accepted listening configuration is `audioDiagnostic=native-fence-scope`: native Web Audio output compression/sample fencing, layered per-endpoint analyser traces, and no custom AudioWorklet reporting. Repository approval remains conditional on clean-runtime qualification and successful promotion; until then, the remote Milestone 09 baseline remains authoritative.
+
+The custom AudioWorklet path remains preserved for engineering reference, but Safari testing found progressive latency, crackle and delayed transport response. Cross-browser parity is not a current core objective because the intended product direction is offline/local. Final safety metering, non-finite latching and the long-term desktop audio boundary are deferred for a later explicit decision.
+
+BASELINE AND SCOPE
+
+- Starting branch: review/m10-safety-audit
+- Starting SHA: 096f5aeb52d4028410174d0c970e7a7e485d1125
+- Approved baseline retained: milestone/ui-interaction-harness at 9af3b8d5d64f8a1bdfbb34f01828c2003a24b314
+- The candidate was verified as descended from the approved baseline before qualification.
+- No M12 work, new synthesis feature, project copy, merge, promotion, or approved-baseline edit was performed.
+
+25-POSITION FIXTURE
+
+The deterministic runtime fixture uses 25 endpoints and 21 source families/oscillators:
+
+- CH01 root + CH02–CH05 Clones: one oscillator, five endpoint branches.
+- CH06 root + CH07–CH10 independent Duplicate-style sources: five independent oscillators whose programming can diverge.
+- CH11–CH25: fifteen additional independent sources.
+- Totals: 25 endpoints, 21 independent source families/oscillators, four Clone endpoints in one family, four Duplicates, and fifteen unrelated independent sources.
+
+The browser fixture uses the same 21/4/4 ownership distribution with 17 initial independent roots, four Clones of CH01, and four Duplicates of CH02. It programs conservative 2% levels and frequencies 50, 53, 56, 78, 110, 220, 221, 330, 440, 441, 550, 880, 1000, 1750, 3500, 6600, and 10000 Hz before adding replicated endpoints. All 25 endpoints are wired and plotted once across the full 5 × 5 grid.
+
+QUALIFICATION RESULTS
+
+- Clone family: one oscillator fed five independently routable/trimmed/panned endpoint branches. Root programming remained shared. The family gain was 1/sqrt(5); after deleting a Clone it became 1/sqrt(4), and recreating the endpoint restored 1/sqrt(5), without source restart.
+- Duplicate family: five independent oscillators existed. Frequency edits diverged, deleting one root did not affect its peers, and no source-family membership leaked between them.
+- Routing: 200 deterministic movement/trim/routability/transport mutations produced no source or infrastructure creation drift. Browser disconnection of a Clone, Duplicate, and ordinary endpoint removed each from the sounding set; reverse-order reconnection restored all 25. No ghost audio was observed in the digital graph.
+- Transport: rapid pause/play/stop sequences retained one session gate, one context, one master, one safety processor, and the original 21 oscillator count. Programming survived transport.
+- Movement/grid: all 25 canonical coordinates held one intended endpoint in the initial fixture. Swaps preserved 25 identities and did not recreate sources. Removal freed identity/coordinate state.
+- Live Trim/mute: -100, negative, zero, +8, and the +16% maximum were exercised. Values stayed endpoint-owned and finite; programmed source level was unchanged. Smoothing diagnostics continued to advance.
+- Deletion: active Clone deletion removed one endpoint and renormalised its family. Confirmed source-family disposal stopped its oscillator and removed every Clone contribution while unrelated Duplicates stayed active. Active independent-source and Duplicate deletion left no sounding or analyser identity behind. Existing browser coverage retained cancel/confirm and Quick Delete semantics.
+- Original qualification Monitor: the browser reported 25 final-output paths, one canvas, measured finite dBFS, one safety subscriber, and no SAFETY MUTE under the conservative AudioWorklet fixture.
+- Approved local listening Monitor: one canvas draws one colour-coded analyser trace per sounding endpoint at a bounded 30 Hz visual rate. This is a layered pre-pan/pre-sum endpoint view rather than a summed post-protection master trace. Worklet meter reporting is disabled in this configuration.
+- Stereo peak: asymmetric stereo fixtures reported the maximum absolute sample across channels; a quiet opposite channel did not conceal the hotter channel.
+- 10× finite overload: five seconds of synthetic stereo blocks remained finite, stayed at or below the -6 dBFS sample ceiling, truthfully reported OVERLOAD, and recovered to NORMAL with unity gain after two seconds of silence.
+- 100× finite overload: the same assertions passed at 100× input.
+- Overload policy: retain OVERLOAD + CLAMP. The current engine cannot robustly distinguish intentionally extreme finite audio from an upstream finite failure; an arbitrary panic timeout would create false safety mutes. Non-finite input remains the deterministic fail-closed boundary.
+- Non-finite safety: NaN/Infinity audio latched SAFETY MUTE, emitted zero, and stayed muted until deliberate reset.
+- Reset truth: reset now enters RESET REQUESTED and cannot report NORMAL until the audio worklet returns an acknowledgement carrying the matching request ID. Unrelated/stale reports cannot clear the pending state.
+- MessagePort: shutdown nulls onmessage and closes the port before closing/discarding the context. Recreating the runtime owns one new handler and one new port.
+- Worklet failure: injected creation failure closed the context, created no destination connection, created no master/safety path, and exposed an understandable channel error. There is no unsafe master-to-destination fallback.
+- Invalid controls: invalid frequency, programmed level, Live Trim, pan, and safety reports were rejected or clamped without non-finite AudioParam values, crashes, restarts, or runaway gain. Spatial reducer Live Trim now preserves the previous valid value for NaN, infinities, undefined, null, and strings.
+- Return to one: active channels=1, active sources=1, known sources=1; context/master/safety creation counts remained one.
+- Return to zero: active channels=0, active sources=0, known sources=0, no sounding IDs; shared infrastructure intentionally remained singular.
+- Rebuild after zero: a fresh source sounded without reload using the same context/master/safety infrastructure.
+- Repeated cycles: three 25-endpoint populate/mutate/delete cycles ended at zero each time. Channel/analyser/panner creations equalled disposals, known sources returned to zero, listener counts stayed one while subscribed and returned to zero after unsubscribe, and context/master/safety creation counts stayed one.
+
+RESOURCE AND PERFORMANCE OBSERVATIONS
+
+The repeated-cycle diagnostics provide resource-balance evidence, not a proof of absence of every browser memory leak. Node heap snapshots were not treated as precise browser-memory measurements. A reused-buffer DSP microbenchmark processed 200,000 stereo 128-sample blocks per case (533.33 seconds of modeled audio):
+
+- normal 0.08 input: 16.803 microseconds/block, 158.7× real time, +39,216 bytes post-GC heap delta;
+- 10× input: 17.280 microseconds/block, 154.3× real time, +5,160 bytes post-GC heap delta;
+- 100× input: 12.261 microseconds/block, 217.5× real time, +2,712 bytes post-GC heap delta.
+
+These figures are a JavaScript DSP microbenchmark on the current machine, not an audio-dropout or universal device guarantee. The browser completed the 25-endpoint UI journey in about 1.4 minutes. A deliberate 200 ms main-thread busy interval delayed UI work as expected; the AudioWorklet-backed safety report remained available and finite immediately afterward. This supports thread separation but does not independently prove dropout-free physical audio. The Monitor retained one oscilloscope canvas/RAF owner after workspace navigation; no analyser, listener, or source count growth appeared.
+
+ERROR LOG AUDIT
+
+The successful full browser run produced no page exceptions, captured console errors, React warnings, duplicate-key warnings, rejected promises, AudioContext errors, AudioWorklet errors, or stop lifecycle errors. Node's NO_COLOR/FORCE_COLOR startup warning is tooling/environment noise and not an application defect.
+
+PROVEN DEFECTS AND MINIMAL REPAIRS
+
+1. Test: safety reset acknowledgement audit. Failure: UI changed directly from SAFETY MUTE to NORMAL after posting reset. Root cause: main-thread optimistic state update. Fix: request-sequenced RESET REQUESTED state plus matching worklet acknowledgement. Regression: audio-runtime safety-report test.
+2. Test: return-to-zero/repeated-cycle diagnostics. Failure: inactive source records remained after their final endpoint was disposed. Root cause: disposeChannel removed endpoint nodes but retained an empty source/configuration record. Fix: remove source/configuration when no family endpoint remains; otherwise only renormalise. Regression: system qualification return-to-zero and repeated-cycle tests.
+3. Test: MessagePort lifecycle audit. Failure: the worklet message handler was still attached during shutdown. Root cause: shutdown closed the context/port without explicitly nulling onmessage first. Fix: null handler, close port, then close/discard context. Regression: shutdown/recreation lifecycle test.
+4. Test: invalid Live Trim injection. Failure: the spatial reducer accepted NaN and stored a non-finite value. Root cause: Math.min/Math.max do not sanitise NaN. Fix: reject non-number/non-finite action values and preserve prior state. Regression: invalid Live Trim reducer test plus runtime invalid-parameter coverage.
+5. Test: dense CH17 browser wiring. Failure: the non-interactive canvas key intercepted pointer input over a low Channel Out terminal. Root cause: legend z-order with active pointer events. Fix: pointer-events:none on the visual legend. Regression: the unchanged visible-control portion of the 25-position Playwright journey wires CH17 successfully.
+
+AUTOMATED GATES
+
+- TypeScript: PASS.
+- ESLint: PASS.
+- Production build: PASS.
+- Final local Node unit/model tests: 78/78 PASS.
+- Final Playwright browser tests: 18/18 PASS, including the 25-position journey, layered-monitor modes, and non-blocking deletion regression.
+- Accessibility: PASS; retained axe gate reports no serious or critical violations.
+- Git whitespace integrity: PASS.
+
+KNOWN LIMITATIONS
+
+- Automated tests establish graph state and digital bounds, not perceived stutter, clicks, spatial quality, acoustic SPL, hearing safety, speaker safety, DAC/driver behavior, or universal performance.
+- The -6 dBFS fence is sample peak, not true peak/dBTP.
+- Browser heap data cannot reliably prove the absence of all memory leaks; balanced owned-resource counts across repeated cycles are the stronger available evidence.
+- Threads is a freeform canvas. Automatically placing 25 modules without arranging them creates visual overlap; the qualification harness directly selects known covered controls after validating placement. Manual acceptance should arrange modules as it builds the session.
+- Sustained finite overload stays bounded as OVERLOAD + CLAMP and does not automatically become SAFETY MUTE.
+
+CONSERVATIVE MANUAL M11 USER TEST
+
+Do not reproduce pathological overload through physical monitors. Begin at low interface/monitor gain and use 1–2% programmed levels.
+
+1. Build several independent sine sources across low, mid, and high frequencies; arrange their cards so controls remain reachable, wire each to any free Channel Out, and plot them at distinct grid positions.
+2. Quietly start a few sources. Confirm Monitor shows a real post-protection waveform, finite dBFS, and the correct path count; do not seek LIMITING/OVERLOAD acoustically.
+3. Create one Clone and one Duplicate. Confirm the Clone Inspector is locked to its source programming and the Duplicate can be retuned independently.
+4. Move the root, Clone, Duplicate, and an unrelated channel. Apply modest negative/positive Live Trim, reset to zero, and mute one endpoint. Confirm heard position/level follows the visible endpoint while root programmed level remains unchanged.
+5. Disconnect the Clone, then the Duplicate, then an ordinary source. Each must disappear audibly and from sounding state. Reconnect them in a different order and confirm only visibly routed, active endpoints return.
+6. Exercise Play, Pause, Resume, Stop, and Play. Confirm the timer and Monitor agree with transport and no accumulated loudness appears.
+7. Quick Delete the Clone and Duplicate separately. Recreate a Clone, open source deletion, cancel once, then confirm deletion. Confirm unrelated channels continue.
+8. Reduce the session to one quiet ordinary channel, then zero, then create one fresh channel without refreshing. Confirm the application remains coherent.
+9. Record any audible click, dropout, unexpected loudness, stale wire, wrong identity, frozen meter, or mismatch between representation and sound. Stop immediately if output is unexpectedly loud.
+
+HARD FAILURE GATE
+
+Automated M11 qualification passed the original defined gate. Subsequent Safari acceptance isolated the custom AudioWorklet as the cause of progressive latency and established `native-fence-scope` as the accepted listening configuration. Threads, transport, channel deletion, live plotting and plot changes were manually accepted without crackle, interruption, latency or dysfunctional controls. M10/M10.1/M11 remains a repository-unapproved candidate until clean-runtime qualification and promotion succeed; M09 remains authoritative and M12 has not begun.

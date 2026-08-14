@@ -5,6 +5,7 @@ import {
   useReducer,
   useRef,
   useState,
+  useSyncExternalStore,
   type CSSProperties,
   type PointerEvent,
 } from "react";
@@ -73,6 +74,12 @@ import {
   spatialRoutingReducer,
   type SpatialRoutingState,
 } from "./spatial-routing";
+import {
+  diagnosticMeterEnabled,
+  diagnosticScopeEnabled,
+  getAudioDiagnosticMode,
+  type AudioDiagnosticMode,
+} from "./audio-diagnostics.ts";
 
 const APP_SNAPSHOT_KEY = "rfe-interaction-harness-snapshot-v1";
 const rootNotes = ["C2", "C3", "C4", "D3", "E3", "G3", "A3"];
@@ -84,9 +91,13 @@ function useAudioRuntimeRevision() {
   useEffect(() => applicationAudioRuntime.subscribe(() => setRevision((value) => value + 1)), []);
 }
 
-function useMasterSafetyRevision() {
+function useMasterSafetyRevision(enabled = true) {
   const [, setRevision] = useState(0);
-  useEffect(() => applicationAudioRuntime.subscribeMasterSafety(() => setRevision((value) => value + 1)), []);
+  useEffect(() => enabled ? applicationAudioRuntime.subscribeMasterSafety(() => setRevision((value) => value + 1)) : undefined, [enabled]);
+}
+
+function useAudioDiagnosticMode() {
+  return useSyncExternalStore<AudioDiagnosticMode>(() => () => {}, getAudioDiagnosticMode, () => "full");
 }
 
 function useAudioChannel(channelId: ChannelId | null) {
@@ -602,6 +613,7 @@ function ChannelAudioControls({ channel, selected, sourceModuleId, sourcePlaced,
   dispatch: React.Dispatch<Parameters<typeof appReducer>[1]>;
 }) {
   const audio = useAudioChannel(channel.id)!;
+  const [removeConfirmationOpen, setRemoveConfirmationOpen] = useState(false);
   const removeChannel = () => {
     if (channel.role === "clone") {
       applicationAudioRuntime.disposeChannel(channel.id);
@@ -613,16 +625,22 @@ function ChannelAudioControls({ channel, selected, sourceModuleId, sourcePlaced,
       dispatch({ type: "set-status", value: `${channel.label} has linked Clone paths — confirm deletion in Inspector` });
       return;
     }
-    if (window.confirm(`Remove ${channel.label} and its downstream route?`)) {
-      applicationAudioRuntime.disposeSource(channel.id);
-      dispatch({ type: "remove-channel", channelId: channel.id });
-    }
+    setRemoveConfirmationOpen(true);
+  };
+  const confirmRemoveChannel = () => {
+    applicationAudioRuntime.disposeSource(channel.id);
+    dispatch({ type: "remove-channel", channelId: channel.id });
   };
   return <>
     <div className="input-channel-row">
       <button className="channel-select" onClick={() => dispatch({ type: "select-channel", channelId: channel.id })} aria-pressed={selected}><span>{channel.label}</span><small>{audio.active ? "SINE · ACTIVE" : "SINE · SILENT"}</small></button>
       <button className="channel-remove" aria-label={`Remove ${channel.label}`} onClick={removeChannel}>×</button>
     </div>
+    {removeConfirmationOpen && <div className="channel-remove-confirmation" role="alert" aria-live="assertive">
+      <strong>REMOVE {channel.label}?</strong>
+      <p>This removes the channel and its downstream route. Other sounding channels remain uninterrupted.</p>
+      <div><button onClick={() => setRemoveConfirmationOpen(false)}>CANCEL</button><button className="danger" onClick={confirmRemoveChannel}>REMOVE {channel.label}</button></div>
+    </div>}
     {!sourcePlaced && <SinePlayerControls channelId={channel.id} label={channel.label} audio={audio} onPlace={() => dispatch({ type: "place-channel-source", channelId: channel.id })} onToggle={() => dispatch({ type: "select-channel", channelId: channel.id })} />}
   </>;
 }
@@ -681,47 +699,56 @@ function SineSourceInspector({ state, module, dispatch }: { state: AppState; mod
   </div>;
 }
 
-function SignalTrace({ soundingChannelKey, soundDeskMuted }: { soundingChannelKey: string; soundDeskMuted: boolean }) {
+function SignalTrace({ soundingChannelKey, traceColorKey, soundDeskMuted, enabled = true }: { soundingChannelKey: string; traceColorKey: string; soundDeskMuted: boolean; enabled?: boolean }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
+    if (!enabled) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const context = canvas.getContext("2d");
     if (!context) return;
     const soundingChannelIds = soundingChannelKey ? soundingChannelKey.split(",") as ChannelId[] : [];
-    const outputSamples = new Float32Array(512);
+    const traceColors = traceColorKey ? traceColorKey.split(",") : [];
+    const channelSamples = soundingChannelIds.map(() => new Float32Array(512));
     let frame = 0;
-    const draw = () => {
+    let lastDraw = 0;
+    const draw = (timestamp: number) => {
+      frame = window.requestAnimationFrame(draw);
+      if (timestamp - lastDraw < 1_000 / 30) return;
+      lastDraw = timestamp;
       const width = canvas.width;
       const height = canvas.height;
       context.clearRect(0, 0, width, height);
-      if (!soundingChannelIds.length) return;
       const baseColor = getComputedStyle(canvas).color;
-      const data = applicationAudioRuntime.getMasterWaveform(outputSamples);
-      if (!data) return;
-      context.globalAlpha = 0.95;
-      context.strokeStyle = baseColor;
-      context.lineWidth = 1.8;
-      context.beginPath();
-      data.forEach((sample, index) => {
-        const x = index / Math.max(1, data.length - 1) * width;
-        const value = Math.max(-1, Math.min(1, sample));
-        const y = (0.5 - value * 0.42) * height;
-        if (index === 0) context.moveTo(x, y); else context.lineTo(x, y);
+      soundingChannelIds.forEach((channelId, traceIndex) => {
+        const data = applicationAudioRuntime.getWaveform(channelId, channelSamples[traceIndex]);
+        if (!data) return;
+        const tracePosition = soundingChannelIds.length === 1 ? 0 : traceIndex / (soundingChannelIds.length - 1) - 0.5;
+        const centreY = height * (0.5 + tracePosition * 0.22);
+        context.globalAlpha = soundingChannelIds.length === 1 ? 0.95 : 0.78;
+        context.strokeStyle = traceColors[traceIndex] || baseColor;
+        context.lineWidth = soundingChannelIds.length === 1 ? 1.8 : 1.35;
+        context.beginPath();
+        data.forEach((sample, index) => {
+          const x = index / Math.max(1, data.length - 1) * width;
+          const value = Math.max(-1, Math.min(1, sample));
+          const y = centreY - value * height * 0.3;
+          if (index === 0) context.moveTo(x, y); else context.lineTo(x, y);
+        });
+        context.stroke();
       });
-      context.stroke();
       context.globalAlpha = 1;
-      frame = window.requestAnimationFrame(draw);
     };
-    draw();
+    frame = window.requestAnimationFrame(draw);
     return () => window.cancelAnimationFrame(frame);
-  }, [soundingChannelKey]);
+  }, [enabled, soundingChannelKey, traceColorKey]);
   const soundingCount = soundingChannelKey ? soundingChannelKey.split(",").length : 0;
-  const idleLabel = soundDeskMuted ? "Combined signal monitor idle; focused channel Sound Desk muted" : "Combined signal monitor idle; no sounding channels";
-  return <div className={`signal-monitor ${soundingCount ? "signal-active" : ""}`} aria-label={soundingCount ? `Combined signal monitor active with ${soundingCount} sounding ${soundingCount === 1 ? "channel" : "channels"}` : idleLabel}>
+  const idleLabel = soundDeskMuted ? "Layered signal monitor idle; focused channel Sound Desk muted" : "Layered signal monitor idle; no sounding channels";
+  return <div className={`signal-monitor ${soundingCount ? "signal-active" : ""}`} data-trace-count={soundingCount} aria-label={soundingCount ? `Layered signal monitor active with ${soundingCount} sounding ${soundingCount === 1 ? "channel" : "channels"}` : idleLabel}>
     <canvas ref={canvasRef} width="360" height="72" aria-hidden="true" />
+    {!enabled && <><div className="signal-baseline" aria-hidden="true" /><strong>TRACE OFF</strong><small>DIAGNOSTIC MODE</small></>}
     {!soundingCount && <><div className="signal-baseline" aria-hidden="true" /><strong>{soundDeskMuted ? "SD MUTED" : "NO SIGNAL"}</strong><small>{soundDeskMuted ? "Sound Desk Live Trim -100%" : "Start and route a channel, then play the session"}</small></>}
-    {soundingCount > 0 && <small>FINAL OUTPUT · {soundingCount} {soundingCount === 1 ? "PATH" : "PATHS"}{soundDeskMuted ? " · FOCUS SD MUTED" : ""}</small>}
+    {soundingCount > 0 && <small>LAYERED VIEW · {soundingCount} {soundingCount === 1 ? "TRACE" : "TRACES"}{soundDeskMuted ? " · FOCUS SD MUTED" : ""}</small>}
   </div>;
 }
 
@@ -729,30 +756,35 @@ function formatDbfs(value: number) {
   return Number.isFinite(value) ? `${value.toFixed(1)} dBFS` : "−∞ dBFS";
 }
 
-function MasterSafetyMeter() {
-  useMasterSafetyRevision();
+function MasterSafetyMeter({ reportingEnabled = true }: { reportingEnabled?: boolean }) {
+  useMasterSafetyRevision(reportingEnabled);
   const safety = applicationAudioRuntime.getMasterSafetySnapshot();
   return <div className={`master-safety-meter safety-${safety.state.toLowerCase().replace(" ", "-")}`} aria-label="Master safety meter">
     <span>MASTER SAFETY</span>
-    <strong>{formatDbfs(safety.currentPeakDbfs)}</strong>
-    <small>HOLD {formatDbfs(safety.peakHoldDbfs)} · REDUCTION {Number.isFinite(safety.reductionDb) ? `${safety.reductionDb.toFixed(1)} dB` : "MUTED"}</small>
-    <b>{safety.available ? safety.state : "STANDBY"}</b>
+    <strong>{reportingEnabled ? formatDbfs(safety.currentPeakDbfs) : "REPORT OFF"}</strong>
+    <small>{reportingEnabled ? <>HOLD {formatDbfs(safety.peakHoldDbfs)} · REDUCTION {Number.isFinite(safety.reductionDb) ? `${safety.reductionDb.toFixed(1)} dB` : "MUTED"}</> : "AUDIO-THREAD PROTECTION RETAINED"}</small>
+    <b>{reportingEnabled ? safety.available ? safety.state : "STANDBY" : "DIAGNOSTIC MODE"}</b>
     {safety.muteReason && <em>{safety.muteReason}</em>}
     {safety.state === "SAFETY MUTE" && <button onClick={() => applicationAudioRuntime.resetSafetyMute()}>RESET SAFETY MUTE</button>}
   </div>;
 }
 
-function Monitor({ state, selectedModule, selectedModules, selectedConnection }: {
+function Monitor({ state, selectedModule, selectedModules, selectedConnection, audioDiagnosticMode = "full" }: {
   state: AppState;
   selectedModule: ModuleInstance | null;
   selectedModules: ModuleInstance[];
   selectedConnection: ThreadConnection | null;
+  audioDiagnosticMode?: AudioDiagnosticMode;
 }) {
   const selectedChannel = state.selection?.kind === "channel" ? state.threadChannels.find((channel) => channel.id === state.selection?.id) ?? null : null;
   const sourceChannel = selectedModule?.audioChannelId ?? (selectedModule ? state.channelTerminalConnections.find((connection) => connection.fromModuleId === selectedModule.id)?.channelId : null);
   const currentChannel = selectedChannel ?? state.threadChannels.find((channel) => channel.id === sourceChannel) ?? state.threadChannels[0] ?? null;
   const audio = useAudioChannel(currentChannel?.id ?? null);
-  const soundingChannelKey = applicationAudioRuntime.getSoundingChannelIds().join(",");
+  const soundingChannelIds = applicationAudioRuntime.getSoundingChannelIds();
+  const soundingChannelKey = soundingChannelIds.join(",");
+  const traceColorKey = soundingChannelIds.map((channelId) => MUTED_ACCENTS.find((accent) => accent.id === state.threadChannels.find((channel) => channel.id === channelId)?.accentId)?.value ?? "").join(",");
+  const meterEnabled = diagnosticMeterEnabled(audioDiagnosticMode);
+  const scopeEnabled = diagnosticScopeEnabled(audioDiagnosticMode);
   const soundDeskMuted = Boolean(audio?.active && audio.routable && audio.liveTrim === LIVE_TRIM_MIN);
   const display = selectedModule ? getModuleDisplay(selectedModule) : null;
   const audioFocused = Boolean(audio && currentChannel && (selectedChannel || sourceChannel || !state.selection));
@@ -762,14 +794,15 @@ function Monitor({ state, selectedModule, selectedModules, selectedConnection }:
   return <div className="monitor-content" role="status" aria-live="polite" aria-label="Selection monitor">
     <div className="monitor-focus"><span>CURRENT FOCUS</span><strong>{currentChannel ? `${currentChannel.label} / ${String(state.threadChannels.length).padStart(2, "0")}` : "NO CHANNEL"}</strong><small>{focusTitle}</small></div>
     <div className="monitor-object"><span>OBJECT</span><strong>{focusType}</strong><small>{focusDetail}</small></div>
-    {audio && currentChannel ? <SignalTrace soundingChannelKey={soundingChannelKey} soundDeskMuted={soundDeskMuted} /> : <div className="signal-monitor" aria-label="Signal monitor idle; no channel"><div className="signal-baseline" aria-hidden="true" /><strong>NO CHANNEL</strong><small>Add a channel to begin</small></div>}
-    <MasterSafetyMeter />
+    {audio && currentChannel ? <SignalTrace soundingChannelKey={soundingChannelKey} traceColorKey={traceColorKey} soundDeskMuted={soundDeskMuted} enabled={scopeEnabled} /> : <div className="signal-monitor" aria-label="Signal monitor idle; no channel"><div className="signal-baseline" aria-hidden="true" /><strong>NO CHANNEL</strong><small>Add a channel to begin</small></div>}
+    <MasterSafetyMeter reportingEnabled={meterEnabled} />
     <div className="monitor-session"><span>AUDIO</span><strong>{soundDeskMuted ? "SD MUTED" : audio?.active && !audio.routable ? "UNROUTED" : audio?.active ? "ACTIVE" : audio?.availability === "error" ? "ERROR" : "SILENT"}</strong><small>{audio ? soundDeskMuted ? "Sound Desk Live Trim -100%" : audio.active && !audio.routable ? "Connect to any free Channel Out" : audio.active ? `${audio.frequency} Hz · ${audio.level}%` : audio.message : "No channel selected"}</small></div>
   </div>;
 }
 
 export default function Home() {
   const isDevelopment = process.env.NODE_ENV === "development";
+  const audioDiagnosticMode = useAudioDiagnosticMode();
   const [state, dispatch] = useReducer(appReducer, undefined, createInitialState);
   const [spatialRouting, dispatchSpatialRouting] = useReducer(spatialRoutingReducer, undefined, createInitialSpatialRoutingState);
   useEffect(() => {
@@ -990,7 +1023,7 @@ export default function Home() {
           </div></div>
       </WindowFrame>
       <WindowFrame title="Thread Inspector" className="inspector-window"><Inspector state={state} selectedModule={selectedModule} selectedModules={selectedModules} selectedConnection={selectedConnection} uiConfig={uiConfig} updateParameter={updateParameter} setAccent={(accentId) => selectedModule && dispatch({ type: "set-accent", id: selectedModule.id, accentId })} setHighlightStyle={setHighlightStyle} setHighlightWeight={setHighlightWeight} dispatch={dispatch} /></WindowFrame>
-      <WindowFrame title="Monitor" className="diagnostics-window monitor-window" compactControls><Monitor state={state} selectedModule={selectedModule} selectedModules={selectedModules} selectedConnection={selectedConnection} /></WindowFrame>
+      <WindowFrame title="Monitor" className="diagnostics-window monitor-window" compactControls><Monitor state={state} selectedModule={selectedModule} selectedModules={selectedModules} selectedConnection={selectedConnection} audioDiagnosticMode={audioDiagnosticMode} /></WindowFrame>
     </div> : activeWorkspace === "sound-desk" ? <SoundDeskWorkspace threadsState={state} state={spatialRouting} dispatch={dispatchSpatialRouting} sessionDispatch={dispatch} /> : <VisualiserWorkspace state={spatialRouting} sessionDispatch={dispatch} />}
     </div>
     <WorkspaceNavigation workspace={activeWorkspace} navigate={navigateWorkspace} />

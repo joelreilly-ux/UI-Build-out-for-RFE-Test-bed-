@@ -72,6 +72,7 @@ export function spatialRoutingReducer(state: SpatialRoutingState, action: Spatia
   const channelExists = state.channels.some((channel) => channel.id === action.channelId);
   if (!channelExists) return state;
   if (action.type === "set-live-trim") {
+    if (typeof action.value !== "number" || !Number.isFinite(action.value)) return state;
     const liveTrim = Math.max(-100, Math.min(16, Math.round(action.value)));
     return { channels: state.channels.map((channel) => channel.id === action.channelId ? { ...channel, liveTrim } : channel) };
   }
