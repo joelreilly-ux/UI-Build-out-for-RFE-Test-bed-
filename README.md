@@ -50,9 +50,9 @@ pnpm test
 
 ## Milestone boundaries
 
-The approved repository baseline is Milestone 09. It includes verified multi-channel concurrency, channel-bound sine source placement/wiring, X-axis stereo placement, relative Live Trim, smoothed shared transport paired to the elapsed timer, composite sounding-channel Monitor waveform, and explicit Sound Desk mute status. Y audio, distance/depth/elevation, automatic distribution, Blend/processing semantics, arbitrary graph mixing, recording and sample playback remain unimplemented.
+The approved repository baseline is now Milestone 11 on `milestone/ui-interaction-harness`. M09 remains recoverable at `9af3b8d5d64f8a1bdfbb34f01828c2003a24b314`.
 
-The current M10/M10.1/M11 review candidate has completed automated qualification and manual listening acceptance but remains repository-unapproved until conditional hard-save promotion succeeds. It adds Clone/Duplicate semantics and 25-position system qualification. The accepted listening configuration is `?audioDiagnostic=native-fence-scope`, using native Web Audio output compression/sample fencing and one layered analyser trace per sounding endpoint. The preserved custom AudioWorklet path and its master meter are not part of the accepted Safari listening configuration because testing exposed progressive latency. Final metering, non-finite latching and the eventual offline desktop audio boundary are deferred for a later decision. The 50 Hz–10 kHz commissioning range is not a safe-frequency claim; the native fence is not a true-peak or acoustic-SPL guarantee.
+The qualified M10/M10.1/M11 batch adds Clone/Duplicate semantics and 25-position system qualification. The accepted listening configuration is `?audioDiagnostic=native-fence-scope`, using native Web Audio output compression/sample fencing and one layered analyser trace per sounding endpoint. The preserved custom AudioWorklet path and its master meter are not part of the accepted Safari listening configuration because testing exposed progressive latency. Final metering, non-finite latching and the eventual offline desktop audio boundary are deferred for a later decision. The 50 Hz–10 kHz commissioning range is not a safe-frequency claim; the native fence is not a true-peak or acoustic-SPL guarantee. M12 has not started.
 
 ## Main editing surfaces
 

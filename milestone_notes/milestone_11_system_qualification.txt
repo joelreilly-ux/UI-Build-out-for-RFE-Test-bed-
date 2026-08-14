@@ -2,7 +2,7 @@ MILESTONE 11 — SYSTEM QUALIFICATION, FAILURE-MODE TESTING + STRESS AUDIT
 
 STATUS
 
-Manual candidate acceptance completed on 2026-08-13 after automated qualification and conservative Safari listening/interaction testing. The accepted listening configuration is `audioDiagnostic=native-fence-scope`: native Web Audio output compression/sample fencing, layered per-endpoint analyser traces, and no custom AudioWorklet reporting. Repository approval remains conditional on clean-runtime qualification and successful promotion; until then, the remote Milestone 09 baseline remains authoritative.
+APPROVED THROUGH M11 after clean-runtime qualification and history-preserving promotion on 2026-08-14. Manual acceptance completed on 2026-08-13. The accepted listening configuration is `audioDiagnostic=native-fence-scope`: native Web Audio output compression/sample fencing, layered per-endpoint analyser traces, and no custom AudioWorklet reporting. M09 remains recoverable at `9af3b8d5d64f8a1bdfbb34f01828c2003a24b314`.
 
 The custom AudioWorklet path remains preserved for engineering reference, but Safari testing found progressive latency, crackle and delayed transport response. Cross-browser parity is not a current core objective because the intended product direction is offline/local. Final safety metering, non-finite latching and the long-term desktop audio boundary are deferred for a later explicit decision.
 
@@ -106,4 +106,4 @@ Do not reproduce pathological overload through physical monitors. Begin at low i
 
 HARD FAILURE GATE
 
-Automated M11 qualification passed the original defined gate. Subsequent Safari acceptance isolated the custom AudioWorklet as the cause of progressive latency and established `native-fence-scope` as the accepted listening configuration. Threads, transport, channel deletion, live plotting and plot changes were manually accepted without crackle, interruption, latency or dysfunctional controls. M10/M10.1/M11 remains a repository-unapproved candidate until clean-runtime qualification and promotion succeed; M09 remains authoritative and M12 has not begun.
+Automated M11 qualification and the 2026-08-14 clean-runtime rerun passed. Subsequent Safari acceptance isolated the custom AudioWorklet as the cause of progressive latency and established `native-fence-scope` as the accepted listening configuration. Threads, transport, channel deletion, live plotting and plot changes were manually accepted without crackle, interruption, latency or dysfunctional controls. M10/M10.1/M11 is the approved repository baseline; M09 remains recoverable and M12 has not begun.
