@@ -1,0 +1,82 @@
+MILESTONE 12 — SOUND DESK SPATIAL WORKFLOW REFACTOR
+
+STATUS
+
+USER-ACCEPTED milestone, incorporated into the combined M12–M13 hard-save batch on `agent/milestone-13`, based on M11 hard-save HEAD `a54e9599e10080a8ad4b325ec78c316faf2f48fd`.
+
+USER-FACING WORKFLOW
+
+- Threads no longer offers Clone as a source action. Duplicate remains available and retains independent source/programming semantics.
+- Sound Desk owns Multi-Plot. An already plotted, routable Channel Out can add spatial manifestations with one MULTI-PLOT action.
+- Each plot has its own X/Y position, Live Trim, mute state, selection, and quick removal. Pointer drag snaps decisively to the nearest canonical grid-point centre. Removing one Multi-Plot does not remove its source, Thread, sibling plots, or unrelated routing.
+- Source deletion presents an explicit warning when associated Multi-Plots exist. Sidebar, toolbar, batch, and keyboard deletion paths guard the source-owning object.
+- Plotter Modes opens a compact overlay containing active MANUAL PLOTTER plus disabled AUTO PLOT and ORCHESTRA placeholders. No future-mode behavior is hidden behind them.
+
+ARCHITECTURE AND REUSE
+
+- Spatial state distinguishes the original Channel Out plot from additional Multi-Plot endpoint identities. Extra endpoint IDs remain Sound Desk-owned and do not create Threads cards, Channel Out terminals, or wires.
+- The proven Clone-family audio mechanics are reused below the UI boundary: each Multi-Plot endpoint maps to the original sourceId and receives an independent programmed-gain branch, Live Trim gain, analyser, stereo panner, routing state, and scoped disposal lifecycle.
+- One source family retains one oscillator and one source envelope. Frequency and programmed level remain source-owned and immediately apply to every manifestation.
+- Equal-power family scaling remains `1 / sqrt(N)` and is recalculated when a plot is added or removed. All endpoints still converge through the accepted session/master/native-fence output-safety path.
+- Duplicate still creates a new sourceId, oscillator, programming state, and independent family.
+
+LIVE DRAG AND POINTER LIFECYCLE
+
+- Plot nodes use pointer capture and handle pointer down, move, up, leave, cancel, and lost capture without document-level listeners.
+- Pointer coordinates resolve against the measured centres of the 25 actual coordinate cells and snap to the nearest canonical point. A visible target ring confirms grid engagement. A cancelled or lost drag commits its last valid position; rapid subsequent drags remain usable.
+- The plot overlay is inset by the same responsive padding as the CSS grid. Plot percentages therefore use the same inner coordinate box as the coordinate circles, eliminating the increasing position error away from the origin.
+- Pointer movement is coalesced to requestAnimationFrame. Each frame modulates only the existing endpoint panner through the established 20 ms AudioParam ramp.
+- The hot path suppresses runtime subscriber notification, so React does not rerender the whole Sound Desk for each pointer sample. The final position is committed once to the spatial reducer.
+- Runtime diagnostics prove repeated movement changes smoothing-ramp counts while oscillator, source, channel, analyser, and panner creation counts remain fixed.
+
+FIRST-LISTENING REMEDIATION — 2026-08-14
+
+- A user 10-minute session reported no latency and correct button behavior, then identified four focused defects: a pop on each live Multi-Plot add, uncertain drag engagement, non-zero grid calibration drift, and Sound Desk mute failing to silence audio that remained live through unplotted branches.
+- A new endpoint connected to an already-running source now initializes its Live Trim gain at zero, connects the branch, and uses the established 20 ms ramp to reach its requested gain. Existing family branches continue to renormalise smoothly and the oscillator/source envelope is not restarted.
+- Drag now snaps to the nearest measured grid-cell centre and marks that cell during engagement. Grid and plot-layer padding are one shared CSS variable.
+- Runtime routability normally requires both a complete Threads Channel Out and a Sound Desk assignment. A source family with no assigned endpoint receives one narrow Threads-only audition route so its programming can be heard before spatial release. The audition closes on leaving Threads or as soon as any family endpoint is assigned, preventing it from bypassing Sound Desk trim/mute. Disconnect still clears its assignment; reconnection restores audition in Threads but requires deliberate replotting for Sound Desk output.
+- Muting all plotted endpoints is covered by a browser regression asserting `getSoundingChannelIds()` becomes empty. An unplotted Duplicate is asserted audible for audition in Threads and absent from the sounding set immediately after navigation to Sound Desk.
+
+AUTOMATED QUALIFICATION
+
+- TypeScript: PASS.
+- ESLint: PASS with no warnings.
+- Production vinext build: PASS.
+- Node/model/runtime/render tests: PASS, 83/83.
+- Playwright browser tests: PASS, 18/18, including pop-free live-branch setup at the runtime boundary, exact centre snapping/calibration, all-endpoint mute, silent unplotted sources, Multi-Plot creation/removal, shared programming, interrupted-drag recovery, source singularity, graph stability, Duplicate independence, future-mode placeholders, and the corrected dense 25-endpoint fixture.
+- Accessibility: PASS; axe reports no serious or critical violations.
+- Dense stress fixture: PASS with 21 independent sources/oscillators audible for pre-plot audition in Threads, only assigned endpoints sounding after navigation to Sound Desk, 25 sounding endpoints after all routes are deliberately plotted, one context/master/session/safety path, disconnect/audition/replot churn, and no captured console/page errors.
+- Git whitespace integrity: PASS.
+
+PERFORMANCE / RESOURCE OBSERVATIONS
+
+- A 120-update runtime drag fixture creates no oscillator, source, endpoint graph, analyser, or panner nodes.
+- Browser live drag and interrupted drag retain fixed creation counters; only smoothing ramps advance.
+- Multi-Plot add/remove creates/disposes only the addressed endpoint branch and renormalises its surviving family.
+- Clear-to-zero and rebuild reuse the same AudioContext/master infrastructure and leave no sounding endpoint identities.
+- These diagnostics are ownership/resource evidence, not proof of subjective click-free behavior or universal device performance.
+
+KNOWN LIMITATIONS
+
+- Automated tests prove the new branch enters at zero and ramps, but cannot establish perceived clicks, static, acoustic level, spatial quality, or device-specific performance; conservative manual re-listening remains required.
+- X drives stereo pan continuously. Y remains acoustically neutral.
+- Multi-Plot positions are session state only; durable project persistence is not added.
+- AUTO PLOT and ORCHESTRA are disabled UI placeholders. No trajectory, recording, playback, scheduling, generative path, orchestration, macro, Grid Detuner, Hilbert, or Sierpinski behavior exists.
+- No musical source expansion, new oscillator type, filter, envelope/LFO work, Session Review, or later roadmap feature is included.
+
+CONSERVATIVE MANUAL ACCEPTANCE
+
+1. Begin at low physical output level. Place, wire, and start one source, then open Sound Desk.
+2. Create four Multi-Plots and confirm overall output does not jump unexpectedly as family normalization changes.
+3. Drag each plot independently during playback; listen for smooth movement without source/envelope restart, clicks, static, or progressive latency.
+4. Change source frequency and programmed level in Threads and confirm every manifestation follows.
+5. Set different endpoint trims, mute/unmute one plot, and confirm siblings remain independent.
+6. Remove one Multi-Plot without confirmation and confirm the source, Thread, and siblings survive.
+7. Create a Duplicate, retune it independently, and confirm it does not join the Multi-Plot source family.
+8. Open source deletion, verify the all-Multi-Plots consequence warning, then cancel.
+9. Open Plotter Modes and confirm AUTO PLOT and ORCHESTRA are visibly unavailable.
+10. Clear the session, rebuild one source, and confirm normal playback/routing without reload.
+
+STOP BOUNDARY
+
+User listening/interaction acceptance passed on 2026-08-14 after focused remediation and overload testing. M12 was intentionally carried forward into M13 before the next hard save.

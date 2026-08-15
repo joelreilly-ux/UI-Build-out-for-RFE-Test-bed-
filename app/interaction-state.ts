@@ -6,6 +6,7 @@ import {
   type ChannelTerminalConnection,
   type ThreadChannel,
 } from "./channel-routing.ts";
+import { generatorLabel, normalizePitchedGeneratorType, type PitchedGeneratorType } from "./musical-source.ts";
 
 export type ModuleKind = "source" | "control" | "routing" | "future";
 export type ModuleStatus = "active" | "muted" | "bypassed";
@@ -42,6 +43,7 @@ export type ModuleInstance = {
   accentId: AccentId | null;
   ports: { input: boolean; output: boolean };
   audioChannelId?: ChannelId;
+  generatorType?: PitchedGeneratorType;
 };
 
 export type ThreadConnection = {
@@ -97,9 +99,10 @@ export type AppAction =
   | { type: "commit-channel-output"; channelId: ChannelId }
   | { type: "remove-channel-output"; channelId: ChannelId }
   | { type: "add-channel" }
-  | { type: "place-channel-source"; channelId: ChannelId }
+  | { type: "place-channel-source"; channelId: ChannelId; generatorType?: PitchedGeneratorType }
   | { type: "clone-source"; sourceChannelId: ChannelId }
   | { type: "duplicate-source"; sourceChannelId: ChannelId }
+  | { type: "set-source-generator"; sourceChannelId: ChannelId; generatorType: PitchedGeneratorType }
   | { type: "delete-endpoint"; channelId: ChannelId }
   | { type: "delete-source-family"; sourceChannelId: ChannelId }
   | { type: "remove-channel"; channelId: ChannelId }
@@ -153,16 +156,21 @@ const moduleDefinitions: Array<Omit<ModuleInstance, "parameters" | "accentId" | 
   { id: "audio", type: "audio-in", title: "Audio In", eyebrow: "Future module", kind: "future", enabled: false, position: { x: 33, y: 84 }, parameters: { status: "bypassed" } },
 ];
 
-const sineSourceDefinition: Omit<ModuleInstance, "parameters" | "accentId" | "ports"> & { parameters?: Partial<ModuleParameters> } = {
-  id: "sine-source",
-  type: "sine-source",
-  title: "Sine Source",
-  eyebrow: "Channel source",
+const pitchedGeneratorDefinition: Omit<ModuleInstance, "parameters" | "accentId" | "ports"> & { parameters?: Partial<ModuleParameters> } = {
+  id: "pitched-generator",
+  type: "pitched-generator",
+  title: "Sine Generator",
+  eyebrow: "Pitched generator",
   kind: "source",
   enabled: true,
   position: { x: 12, y: 12 },
   parameters: { status: "active" },
+  generatorType: "sine",
 };
+
+export function isPitchedGeneratorModule(module: Pick<ModuleInstance, "type">): boolean {
+  return module.type === "pitched-generator" || module.type === "sine-source";
+}
 
 export const MODULE_LIBRARY = moduleDefinitions.filter((definition) => definition.enabled).map((definition) => ({ type: definition.type as ModuleTemplateType, title: definition.title }));
 
@@ -301,7 +309,7 @@ export function getModuleDisplay(module: ModuleInstance): { detail: string; valu
     case "seed-injection": return { detail: `Weight ${(module.parameters.seedWeight / 100).toFixed(2)}`, value: (module.parameters.injectStrength / 100).toFixed(2) };
     case "sample-slots": return { detail: module.parameters.status[0].toUpperCase() + module.parameters.status.slice(1), value: "12 / 16" };
     case "particle-mapping": return { detail: "Harmonic map", value: module.parameters.output };
-    case "sine-source": return { detail: module.audioChannelId?.replace("channel-", "CH ") ?? "UNBOUND", value: "SINE" };
+    case "pitched-generator": case "sine-source": return { detail: module.audioChannelId?.replace("channel-", "CH ") ?? "UNBOUND", value: generatorLabel(normalizePitchedGeneratorType(module.generatorType)).toUpperCase() };
     default: return { detail: module.parameters.scale, value: module.parameters.duration };
   }
 }
@@ -379,7 +387,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     case "duplicate-selection": {
       const selectedIds = getSelectedModuleIds(state.selection);
       if (!selectedIds.length) return state;
-      if (state.modules.some((module) => selectedIds.includes(module.id) && module.audioChannelId)) return withUpdate(state, { statusMessage: "Channel-bound sine sources cannot be duplicated; place them from their channel" });
+      if (state.modules.some((module) => selectedIds.includes(module.id) && module.audioChannelId)) return withUpdate(state, { statusMessage: "Channel-bound generators cannot be duplicated with the module command; use Duplicate in the source Inspector" });
       const idMap = new Map(selectedIds.map((id) => [id, `${state.modules.find((module) => module.id === id)?.type ?? "module"}-${crypto.randomUUID()}`]));
       const duplicates = state.modules.filter((module) => selectedIds.includes(module.id)).map((module) => ({
         ...module,
@@ -433,13 +441,16 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     case "place-channel-source": {
       const channel = state.threadChannels.find((item) => item.id === action.channelId);
       if (!channel) return state;
-      const existing = state.modules.find((module) => module.audioChannelId === channel.id && module.type === "sine-source");
-      if (existing) return withUpdate(state, { selection: { kind: "module", id: existing.id }, pendingConnectionFrom: null, statusMessage: `${channel.label} sine source already placed` });
+      const existing = state.modules.find((module) => module.audioChannelId === channel.id && isPitchedGeneratorModule(module));
+      const generatorType = normalizePitchedGeneratorType(action.generatorType);
+      const generatorName = generatorLabel(generatorType);
+      if (existing) return withUpdate(state, { selection: { kind: "module", id: existing.id }, pendingConnectionFrom: null, statusMessage: `${channel.label} ${generatorName} generator already placed` });
       const channelIndex = state.threadChannels.findIndex((item) => item.id === channel.id);
-      const id = `sine-source-${channel.id}-${crypto.randomUUID()}`;
-      const instance = createModule(sineSourceDefinition, {
+      const id = `pitched-generator-${channel.id}-${crypto.randomUUID()}`;
+      const instance = createModule(pitchedGeneratorDefinition, {
         id,
-        title: `${channel.label} Sine`,
+        title: `${channel.label} ${generatorName}`,
+        generatorType,
         audioChannelId: channel.id,
         accentId: channel.accentId,
         ports: { input: false, output: true },
@@ -449,21 +460,22 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       const channelTerminalConnections = legacyConnection
         ? state.channelTerminalConnections.map((connection) => connection.id === legacyConnection.id ? { ...connection, fromModuleId: id } : connection)
         : state.channelTerminalConnections;
-      return withUpdate(state, { modules: [...state.modules, instance], channelTerminalConnections, selection: { kind: "module", id }, pendingConnectionFrom: null, statusMessage: legacyConnection ? `${channel.label} sine source placed and routed through ${channel.label} Channel Out` : `${channel.label} sine source placed — connect its output to any free Channel Out` });
+      return withUpdate(state, { modules: [...state.modules, instance], channelTerminalConnections, selection: { kind: "module", id }, pendingConnectionFrom: null, statusMessage: legacyConnection ? `${channel.label} ${generatorName} generator placed and routed through ${channel.label} Channel Out` : `${channel.label} ${generatorName} generator placed — connect its output to any free Channel Out` });
     }
     case "clone-source": {
       const sourceChannel = state.threadChannels.find((channel) => channel.id === action.sourceChannelId && channel.role !== "clone");
-      const sourceModule = state.modules.find((module) => module.type === "sine-source" && module.audioChannelId === sourceChannel?.id);
+      const sourceModule = state.modules.find((module) => isPitchedGeneratorModule(module) && module.audioChannelId === sourceChannel?.id);
       if (!sourceChannel || !sourceModule) return withUpdate(state, { statusMessage: "Place the source in Threads before cloning it" });
       const sequence = getNextChannelSequence(state.threadChannels);
       const channel = createChannelDefinition(sequence, { role: "clone", sourceId: sourceChannel.sourceId });
       const id = `sine-clone-${channel.id}-${crypto.randomUUID()}`;
-      const instance = createModule(sineSourceDefinition, {
+      const instance = createModule(pitchedGeneratorDefinition, {
         id,
         title: `${channel.label} Clone`,
         eyebrow: `Clone of ${sourceChannel.label}`,
         audioChannelId: channel.id,
         accentId: channel.accentId,
+        generatorType: normalizePitchedGeneratorType(sourceModule.generatorType),
         ports: { input: false, output: true },
         position: findSourcePlacement(state.modules, state.threadChannels.length),
       });
@@ -471,14 +483,17 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     }
     case "duplicate-source": {
       const origin = state.threadChannels.find((channel) => channel.id === action.sourceChannelId && channel.role !== "clone");
-      const sourceModule = state.modules.find((module) => module.type === "sine-source" && module.audioChannelId === origin?.id);
+      const sourceModule = state.modules.find((module) => isPitchedGeneratorModule(module) && module.audioChannelId === origin?.id);
       if (!origin || !sourceModule) return withUpdate(state, { statusMessage: "Place the source in Threads before duplicating it" });
       const sequence = getNextChannelSequence(state.threadChannels);
       const channel = createChannelDefinition(sequence, { role: "duplicate", duplicatedFrom: origin.id });
-      const id = `sine-source-${channel.id}-${crypto.randomUUID()}`;
-      const instance = createModule(sineSourceDefinition, {
+      const generatorType = normalizePitchedGeneratorType(sourceModule.generatorType);
+      const generatorName = generatorLabel(generatorType);
+      const id = `pitched-generator-${channel.id}-${crypto.randomUUID()}`;
+      const instance = createModule(pitchedGeneratorDefinition, {
         id,
-        title: `${channel.label} Sine`,
+        title: `${channel.label} ${generatorName}`,
+        generatorType,
         eyebrow: `Duplicated from ${origin.label}`,
         audioChannelId: channel.id,
         accentId: channel.accentId,
@@ -486,6 +501,16 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         position: findSourcePlacement(state.modules, state.threadChannels.length),
       });
       return withUpdate(state, { threadChannels: [...state.threadChannels, channel], modules: [...state.modules, instance], nextChannelSequence: sequence + 1, selection: { kind: "module", id }, pendingConnectionFrom: null, statusMessage: `${channel.label} duplicated from ${origin.label} — independent source, connect to any free Channel Out` });
+    }
+    case "set-source-generator": {
+      const source = state.threadChannels.find((channel) => channel.id === action.sourceChannelId && channel.role !== "clone");
+      if (!source) return state;
+      const generatorType = normalizePitchedGeneratorType(action.generatorType);
+      const generatorName = generatorLabel(generatorType);
+      return withUpdate(state, {
+        modules: state.modules.map((module) => isPitchedGeneratorModule(module) && module.audioChannelId === source.id ? { ...module, generatorType, title: `${source.label} ${generatorName}` } : module),
+        statusMessage: `${source.label} generator set to ${generatorName}`,
+      });
     }
     case "delete-endpoint": {
       const channel = state.threadChannels.find((item) => item.id === action.channelId);
@@ -544,7 +569,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       if (state.selection?.kind === "connection") return appReducer(state, { type: "remove-connection", id: state.selection.id });
       const ids = getSelectedModuleIds(state.selection);
       if (!ids.length) return state;
-      const selectedSource = state.modules.find((module) => ids.includes(module.id) && module.type === "sine-source" && module.audioChannelId);
+      const selectedSource = state.modules.find((module) => ids.includes(module.id) && isPitchedGeneratorModule(module) && module.audioChannelId);
       if (selectedSource?.audioChannelId) {
         const channel = state.threadChannels.find((item) => item.id === selectedSource.audioChannelId);
         if (channel?.role === "clone") return appReducer(state, { type: "delete-endpoint", channelId: channel.id });
@@ -593,8 +618,9 @@ export function sanitizeRestoredState(value: unknown): AppState | null {
   if (!value || typeof value !== "object") return null;
   const candidate = value as Partial<AppState>;
   if (!Array.isArray(candidate.modules) || !Array.isArray(candidate.connections)) return null;
-  const ids = new Set(candidate.modules.map((module) => module?.id).filter(Boolean));
-  if (ids.size !== candidate.modules.length) return null;
+  const modules = candidate.modules.map((module) => isPitchedGeneratorModule(module) ? { ...module, type: "pitched-generator", generatorType: normalizePitchedGeneratorType(module.generatorType), title: module.audioChannelId ? `${module.audioChannelId.replace("channel-", "CH ")} ${generatorLabel(normalizePitchedGeneratorType(module.generatorType))}` : module.title } : module);
+  const ids = new Set(modules.map((module) => module?.id).filter(Boolean));
+  if (ids.size !== modules.length) return null;
   const connections = candidate.connections.filter((connection) => ids.has(connection.fromModuleId) && ids.has(connection.toModuleId));
   const defaultState = createInitialState();
   const threadChannels = Array.isArray(candidate.threadChannels)
@@ -620,7 +646,7 @@ export function sanitizeRestoredState(value: unknown): AppState | null {
   return {
     ...defaultState,
     ...candidate,
-    modules: candidate.modules,
+    modules,
     connections,
     threadChannels,
     channelTerminalConnections,
