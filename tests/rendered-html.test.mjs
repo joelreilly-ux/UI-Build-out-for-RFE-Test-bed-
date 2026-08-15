@@ -32,7 +32,10 @@ test("server-renders the RFE structural shell", async () => {
   assert.match(html, /Collapse Inputs and Channels/);
   assert.match(html, /More tools ↓/);
   assert.match(html, /NO SIGNAL/);
-  assert.match(html, /CH 01 sine signal controls/);
+  assert.match(html, /CH 01 pitched generator controls/);
+  assert.match(html, /CH 01 generator type/);
+  assert.match(html, />TRIANGLE</);
+  assert.match(html, />SAW</);
   assert.match(html, /CH 01 sine frequency/);
   assert.match(html, /Decrease CH 01 frequency by 1 Hz/);
   assert.match(html, /Increase CH 01 frequency by 1 Hz/);
@@ -118,6 +121,9 @@ test("Sound Desk and Visualiser share the canonical spatial grid component", asy
   assert.match(css, /--spatial-grid-line:\s*color-mix\(in srgb, var\(--text-dim\) 70%, transparent\)/);
   assert.match(css, /border-left:\s*1px dashed var\(--spatial-grid-line\)/);
   assert.match(css, /border-top:\s*1px dashed var\(--spatial-grid-line\)/);
+  assert.match(css, /--spatial-grid-padding:\s*clamp\(8px, 1\.6vw, 18px\)/);
+  assert.match(css, /spatial-plot-layer[^}]*inset:\s*var\(--spatial-grid-padding\)/);
+  assert.match(source, /querySelectorAll<HTMLElement>\("\.spatial-point\[data-coordinate\]"\)/);
   assert.match(source, /channel\.shortLabel\.padStart\(2, "0"\)/);
   assert.match(channels, /CHANNEL_ACCENT_IDS = \["coral", "stone", "moss", "utility-blue", "air-blue", "signal-red"\]/);
   assert.match(source, /function ThreadChannelBands/);
@@ -128,7 +134,11 @@ test("Sound Desk and Visualiser share the canonical spatial grid component", asy
   assert.match(source, /function WorkspaceTitlebar/);
   assert.doesNotMatch(source, /Thread outputs arrive here for independent spatial assignment/);
   assert.doesNotMatch(source, /Simulation surface reserved\. Routing inspection is diagnostic only/);
-  assert.match(source, /ORCHESTRA \/ ADVANCED/);
+  assert.match(source, /＋ MULTI-PLOT/);
+  assert.match(source, /AUTO PLOT/);
+  assert.match(source, /ORCHESTRA/);
+  assert.match(source, /<button disabled><strong>AUTO PLOT<\/strong>/);
+  assert.match(source, /<button disabled><strong>ORCHESTRA<\/strong>/);
   assert.match(source, /x2:\s*canvasSize\.width - 72/);
   assert.match(css, /thread-channel-bands[^}]*flex-direction:\s*column/);
   assert.match(css, /border-top:\s*1px dashed var\(--thread-band-line\)/);
@@ -139,14 +149,16 @@ test("Sound Desk and Visualiser share the canonical spatial grid component", asy
   assert.match(css, /spatial-grid-inspection[^}]*height:\s*auto;[^}]*aspect-ratio:\s*1/);
 });
 
-test("Clone Inspector exposes inherited source programming as locked readouts only", async () => {
+test("Threads retires the Clone action while preserving locked legacy shared-endpoint readouts", async () => {
   const source = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  assert.doesNotMatch(source, /dispatch\(\{ type: "clone-source"/);
+  assert.doesNotMatch(source, />Clone<\/button>/);
   assert.match(source, /LOCKED — ADJUST AT SOURCE/);
   assert.match(source, /Waveform, frequency and programmed level are inherited/);
   assert.match(source, /POSITION \+ LIVE TRIM AT SOUND DESK/);
   assert.match(source, /Quick Delete/);
-  const inspectorStart = source.indexOf("function SineSourceInspector");
+  const inspectorStart = source.indexOf("function PitchedGeneratorInspector");
   const cloneBranch = source.slice(source.indexOf('if (channel.role === "clone")', inspectorStart), source.indexOf('return <div className="inspector-content sine-source-inspector">', inspectorStart));
-  assert.doesNotMatch(cloneBranch, /<SinePlayerControls/);
+  assert.doesNotMatch(cloneBranch, /<PitchedGeneratorControls/);
   assert.doesNotMatch(cloneBranch, /setFrequency|setLevel/);
 });

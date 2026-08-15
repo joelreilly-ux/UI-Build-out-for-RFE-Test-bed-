@@ -74,7 +74,7 @@ function harness() {
     const node = new FakeSafetyNode();
     safetyNodes.push(node);
     return node;
-  });
+  }, (callback) => { callback(); return 0; }, () => {});
   return { runtime, contexts, safetyNodes };
 }
 
@@ -131,7 +131,7 @@ test("25-position fixture preserves 21 source families, one five-endpoint Clone 
 
   const cloneEnvelope = contexts[0].oscillators[0].connections[0];
   assert.equal(cloneEnvelope.connections.length, 5);
-  const expectedFiveEndpointGain = 0.008 / Math.sqrt(5);
+  const expectedFiveEndpointGain = 0.008 / 5;
   assert.equal(cloneEnvelope.connections.every((gain) => Math.abs(gain.gain.value - expectedFiveEndpointGain) < 1e-9), true);
   assert.deepEqual([1, 2, 3, 4, 5].map((sequence) => runtime.getChannelSnapshot(id(sequence)).frequency), [50, 50, 50, 50, 50]);
 
@@ -187,11 +187,11 @@ test("Clone mutation renormalises without restart while Duplicate mutation remai
   runtime.disposeChannel(id(5));
   const cloneEnvelope = contexts[0].oscillators[0].connections[0];
   assert.equal(cloneEnvelope.connections.length, 4);
-  assert.equal(cloneEnvelope.connections.every((gain) => Math.abs(gain.gain.value - 0.04 / Math.sqrt(4)) < 1e-9), true);
+  assert.equal(cloneEnvelope.connections.every((gain) => Math.abs(gain.gain.value - 0.04 / 4) < 1e-9), true);
   topology = qualificationTopology();
   runtime.synchronizeTopology(topology);
   assert.equal(cloneEnvelope.connections.length, 5);
-  assert.equal(cloneEnvelope.connections.every((gain) => Math.abs(gain.gain.value - 0.04 / Math.sqrt(5)) < 1e-9), true);
+  assert.equal(cloneEnvelope.connections.every((gain) => Math.abs(gain.gain.value - 0.04 / 5) < 1e-9), true);
   assert.equal(runtime.getDiagnostics().sourceCreations, sourceCreations);
 
   runtime.setFrequency(id(6), 600);

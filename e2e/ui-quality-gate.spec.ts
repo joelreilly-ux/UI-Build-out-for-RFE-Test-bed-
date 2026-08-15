@@ -25,7 +25,8 @@ async function portCenter(page: Page, label: string) {
   return { x: box!.x + box!.width / 2, y: box!.y + box!.height / 2 };
 }
 
-test.beforeEach(async ({ page }) => {
+test.beforeEach(async ({ page }, testInfo) => {
+  if (testInfo.title.includes("M12 dense 25-endpoint")) testInfo.setTimeout(300_000);
   await page.goto("/");
   const closeWorkshop = page.getByRole("button", { name: "Close workshop" });
   if (await closeWorkshop.isVisible()) await closeWorkshop.click();
@@ -281,6 +282,7 @@ test("one shared session timer remains visible and continuous across every works
 });
 
 test("Threads outputs drive the Sound Desk Plotter and Visualiser inspection", async ({ page }) => {
+  test.setTimeout(60_000);
   const terminals = page.getByLabel("Thread channel output terminals");
   await expect(terminals.locator(".channel-output-terminal.complete")).toHaveCount(1);
   await expect(page.locator('[data-channel-output="channel-01"]')).toHaveCount(1);
@@ -297,19 +299,19 @@ test("Threads outputs drive the Sound Desk Plotter and Visualiser inspection", a
   await expect(page.getByRole("button", { name: "CH 01 · complete and routable" })).toBeEnabled();
   await expect(page.getByRole("button", { name: "CH 02 · complete and routable" })).toBeEnabled();
   await expect(page.getByRole("button", { name: /CH 03/ })).toHaveCount(0);
-  await expect(soundGrid.locator(".spatial-channel-node")).toHaveCount(1);
+  await expect(soundGrid.locator(".spatial-plot-node")).toHaveCount(1);
 
   await page.getByRole("button", { name: "CH 02 · complete and routable" }).click();
   await soundGrid.locator('[data-coordinate="-2,-1"]').click();
   await expect(page.getByText("CH 02→(-2,-1)", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Plot route" }).click();
-  await expect(soundGrid.locator('[data-coordinate="-2,-1"] [data-channel-id="channel-02"]')).toBeVisible();
+  await expect(soundGrid.locator('[data-plot-id="channel-02"]')).toBeVisible();
   await expect(page.locator('.plotter-channel-row[data-channel-id="channel-02"]')).toContainText("(-2,-1)");
 
   await page.getByRole("button", { name: "Go to Visualiser" }).click();
   await page.getByRole("button", { name: "Reveal routing inspection" }).click();
   const inspectionGrid = page.getByRole("grid", { name: "Visualiser routing inspection 5 by 5 spatial grid" });
-  await expect(inspectionGrid.locator('[data-coordinate="-2,-1"] [data-channel-id="channel-02"]')).toBeVisible();
+  await expect(inspectionGrid.locator('[data-plot-id="channel-02"]')).toBeVisible();
   const inspectionBox = await inspectionGrid.boundingBox();
   expect(inspectionBox).not.toBeNull();
   expect(Math.abs(inspectionBox!.width - inspectionBox!.height)).toBeLessThan(2);
@@ -329,18 +331,22 @@ test("Threads outputs drive the Sound Desk Plotter and Visualiser inspection", a
   expect(Math.abs(box!.width - box!.height)).toBeLessThan(2);
 });
 
-test("placing a sine player transfers it from the channel menu into Threads for explicit Channel Out wiring", async ({ page }) => {
+test("placing a pitched generator transfers it from the channel menu into Threads for explicit Channel Out wiring", async ({ page }) => {
   await page.getByRole("button", { name: "ADD CHANNEL" }).click();
   const channelFixture = page.locator('.input-channel-fixture[data-channel-id="channel-02"]');
   await expect(channelFixture.locator(".audio-test-controls")).toBeVisible();
-  await page.getByRole("button", { name: "Place CH 02 sine source in Threads" }).click();
+  await page.getByRole("button", { name: "Place CH 02 sine generator in Threads" }).click();
 
-  const sourceNode = page.locator('[data-module-type="sine-source"][data-module-id*="channel-02"]');
+  const sourceNode = page.locator('[data-module-type="pitched-generator"][data-module-id*="channel-02"]');
   await expect(sourceNode).toHaveCount(1);
   await expect(sourceNode.locator(".module-title")).toHaveText("CH 02 Sine");
   await expect(channelFixture.locator(".audio-test-controls")).toHaveCount(0);
   await expect(page.getByRole("region", { name: "Thread Inspector" })).toContainText("Placed source");
   await expect(page.getByRole("region", { name: "Thread Inspector" })).toContainText("Removing the node returns its player");
+  const outputPortBox = await sourceNode.getByRole("button", { name: "Output port for CH 02 Sine" }).boundingBox();
+  expect(outputPortBox).not.toBeNull();
+  expect(outputPortBox!.width).toBeGreaterThanOrEqual(6);
+  expect(outputPortBox!.height).toBeGreaterThanOrEqual(6);
 
   await sourceNode.getByRole("button", { name: "Output port for CH 02 Sine" }).click();
   await page.getByRole("button", { name: "CH 02 output terminal incomplete" }).click();
@@ -375,8 +381,99 @@ test("placing a sine player transfers it from the channel menu into Threads for 
   await page.getByRole("button", { name: "Remove from workspace" }).click();
   await expect(sourceNode).toHaveCount(0);
   await expect(channelFixture.locator(".audio-test-controls")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Place CH 02 sine source in Threads" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Place CH 02 sine generator in Threads" })).toBeVisible();
   await expect(page.getByLabel("CH 02 output incomplete")).toBeVisible();
+});
+
+test("M13 Sine, Triangle, and Saw share pitch architecture while Duplicate and Multi-Plot retain ownership", async ({ page }) => {
+  test.setTimeout(90_000);
+  await page.getByRole("button", { name: "ADD CHANNEL" }).click();
+  await page.getByRole("button", { name: "ADD CHANNEL" }).click();
+  const fixtures = [
+    { sequence: "01", type: "triangle", label: "TRIANGLE", pitch: "110" },
+    { sequence: "02", type: "saw", label: "SAW", pitch: "220" },
+    { sequence: "03", type: "sine", label: "SINE", pitch: "330" },
+  ] as const;
+
+  for (const fixture of fixtures) {
+    const channelLabel = `CH ${fixture.sequence}`;
+    const channelFixture = page.locator(`.input-channel-fixture[data-channel-id="channel-${fixture.sequence}"]`);
+    await channelFixture.locator(".generator-selector").getByRole("button", { name: fixture.label }).click();
+    await channelFixture.getByRole("slider", { name: `${channelLabel} ${fixture.type} frequency` }).fill(fixture.pitch);
+    await channelFixture.getByRole("slider", { name: `${channelLabel} level` }).fill("2");
+    await channelFixture.getByRole("button", { name: `Place ${channelLabel} ${fixture.type} generator in Threads` }).click();
+    const source = page.locator(`[data-module-id^="pitched-generator-channel-${fixture.sequence}"]`);
+    await expect(source).toHaveAttribute("data-module-type", "pitched-generator");
+    await expect(source.locator(".module-title")).toHaveText(`${channelLabel} ${fixture.label[0]}${fixture.label.slice(1).toLowerCase()}`);
+    if (fixture.sequence !== "01") {
+      await source.getByRole("button", { name: `Output port for ${channelLabel} ${fixture.label[0]}${fixture.label.slice(1).toLowerCase()}` }).click();
+      await page.getByRole("button", { name: `${channelLabel} output terminal incomplete` }).click();
+    }
+    await source.locator(".module-body").click();
+    await page.getByRole("button", { name: `${channelLabel} start ${fixture.type} signal` }).click();
+  }
+
+  const runtimeState = () => page.evaluate(() => {
+    const runtime = (window as typeof window & { __rfeAudioRuntime: { getChannelSnapshot(id: string): { frequency: number; generatorType: string; active: boolean }; getDiagnostics(): { activeSources: number; sourceCreations: number; contextCreations: number } } }).__rfeAudioRuntime;
+    return {
+      snapshots: ["channel-01", "channel-02", "channel-03", "channel-04", "channel-02-plot-1"].map((id) => ({ id, ...runtime.getChannelSnapshot(id) })),
+      diagnostics: runtime.getDiagnostics(),
+    };
+  });
+  await expect.poll(async () => (await runtimeState()).diagnostics.activeSources).toBe(3);
+  expect((await runtimeState()).snapshots.slice(0, 3).map(({ frequency, generatorType, active }) => ({ frequency, generatorType, active }))).toEqual([
+    { frequency: 110, generatorType: "triangle", active: true },
+    { frequency: 220, generatorType: "saw", active: true },
+    { frequency: 330, generatorType: "sine", active: true },
+  ]);
+
+  const triangle = page.locator('[data-module-id^="pitched-generator-channel-01"]');
+  await triangle.locator(".module-body").click();
+  await page.getByRole("button", { name: "Duplicate", exact: true }).click();
+  const duplicate = page.locator('[data-module-id^="pitched-generator-channel-04"]');
+  await duplicate.getByRole("button", { name: "Output port for CH 04 Triangle" }).click();
+  await page.getByRole("button", { name: "CH 04 output terminal incomplete" }).click();
+  await duplicate.locator(".module-body").click();
+  await page.getByRole("slider", { name: "CH 04 triangle frequency" }).fill("440");
+  await page.getByRole("slider", { name: "CH 04 level" }).fill("2");
+  await page.getByRole("button", { name: "CH 04 start triangle signal" }).click();
+  await triangle.locator(".module-body").click();
+  await page.getByRole("slider", { name: "CH 01 triangle frequency" }).fill("125");
+  await expect.poll(async () => (await runtimeState()).diagnostics.activeSources).toBe(4);
+  expect((await runtimeState()).snapshots.slice(0, 4).map(({ frequency, generatorType }) => ({ frequency, generatorType }))).toEqual([
+    { frequency: 125, generatorType: "triangle" },
+    { frequency: 220, generatorType: "saw" },
+    { frequency: 330, generatorType: "sine" },
+    { frequency: 440, generatorType: "triangle" },
+  ]);
+
+  const sourcesBeforePlot = (await runtimeState()).diagnostics.sourceCreations;
+  await page.getByRole("button", { name: "Go to Sound Desk" }).click();
+  await page.getByRole("button", { name: "CH 02 · complete and routable" }).click();
+  await page.getByRole("grid", { name: "Sound Desk shared 5 by 5 spatial grid" }).locator('[data-coordinate="1,0"]').click();
+  await page.getByRole("button", { name: "Plot route" }).click();
+  await page.getByRole("button", { name: /MULTI-PLOT/ }).click();
+  await expect.poll(async () => (await runtimeState()).snapshots.find(({ id }) => id === "channel-02-plot-1")?.generatorType).toBe("saw");
+  expect((await runtimeState()).diagnostics).toMatchObject({ activeSources: 4, sourceCreations: sourcesBeforePlot, contextCreations: 1 });
+  await expect(page.getByLabel("Sound Desk endpoint load tally")).toHaveText("SOUNDING 3 / 5 ENDPOINTS · 4 SOURCES");
+
+  await page.getByRole("button", { name: "Go to Threads" }).click();
+  await page.getByRole("button", { name: "More tools" }).click();
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "Clear workspace" }).click();
+  await expect.poll(async () => (await runtimeState()).diagnostics.activeSources).toBe(0);
+  await page.getByRole("button", { name: "ADD CHANNEL" }).click();
+  const rebuiltFixture = page.locator('.input-channel-fixture[data-channel-id="channel-01"]');
+  await rebuiltFixture.locator(".generator-selector").getByRole("button", { name: "SAW" }).click();
+  await rebuiltFixture.getByRole("button", { name: "Place CH 01 saw generator in Threads" }).click();
+  const rebuilt = page.locator('[data-module-id^="pitched-generator-channel-01"]');
+  await rebuilt.getByRole("button", { name: "Output port for CH 01 Saw" }).click();
+  await page.getByRole("button", { name: "CH 01 output terminal incomplete" }).click();
+  await rebuilt.locator(".module-body").click();
+  await page.getByRole("button", { name: "CH 01 start saw signal" }).click();
+  await expect.poll(async () => (await runtimeState()).diagnostics.activeSources).toBe(1);
+  expect((await runtimeState()).snapshots[0]).toMatchObject({ generatorType: "saw", active: true });
+  expect((await runtimeState()).diagnostics.contextCreations).toBe(1);
 });
 
 test("Inputs, workspace tools, and Monitor expand context without losing construction state", async ({ page }) => {
@@ -620,7 +717,7 @@ test("Sound Desk pan and Live Trim feed one smoothed session gate controlled by 
   expect((await audioState()).channel02.pan).toBe(0);
   expect((await audioState()).diagnostics.sourceCreations).toBe(beforeSpatial.diagnostics.sourceCreations);
 
-  const trim = page.getByRole("slider", { name: "CH 01 Live Trim" });
+  const trim = page.getByRole("slider", { name: "CH 01 · PLOT A Live Trim" });
   await trim.fill("16");
   await expect.poll(async () => (await audioState()).channel01.effectiveLevel).toBe(23.2);
   expect((await audioState()).channel01).toMatchObject({ level: 20, liveTrim: 16, pan: -1, active: true });
@@ -637,7 +734,7 @@ test("Sound Desk pan and Live Trim feed one smoothed session gate controlled by 
   await expect(page.getByLabel("Layered signal monitor idle; focused channel Sound Desk muted")).toContainText("SD MUTED");
   await expect(page.getByRole("slider", { name: "CH 01 level" })).toHaveValue("20");
   await page.getByRole("button", { name: "Go to Sound Desk" }).click();
-  await page.getByRole("button", { name: "Reset CH 01 Live Trim to 0" }).click();
+  await page.getByRole("button", { name: "Reset CH 01 · PLOT A Live Trim to 0" }).click();
   await expect.poll(async () => (await audioState()).channel01.effectiveLevel).toBe(20);
 
   await soundGrid.locator('[data-coordinate="-2,-2"]').click();
@@ -669,7 +766,7 @@ test("Sound Desk pan and Live Trim feed one smoothed session gate controlled by 
 
   await page.getByRole("button", { name: "Go to Sound Desk" }).click();
   await expect(page.locator('.plotter-channel-row[data-channel-id="channel-01"]')).toContainText("(2,-2)");
-  await expect(page.getByRole("slider", { name: "CH 01 Live Trim" })).toHaveValue("0");
+  await expect(page.getByRole("slider", { name: "CH 01 · PLOT A Live Trim" })).toHaveValue("0");
   await page.getByRole("button", { name: "Go to Threads" }).click();
   await expect(page.getByRole("slider", { name: "CH 01 level" })).toHaveValue("20");
   await expect(page.getByRole("button", { name: "CH 01 stop sine signal" })).toBeVisible();
@@ -682,63 +779,178 @@ test("approved shell has no serious or critical axe violations", async ({ page }
   expect(blocking, blocking.map((violation) => `${violation.id}: ${violation.help}`).join("\n")).toEqual([]);
 });
 
-test("Clone Inspector keeps shared source programming read-only and follows root edits", async ({ page }) => {
-  await page.getByRole("button", { name: "Place CH 01 sine source in Threads" }).click();
-  await expect(page.getByText("Source actions", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Clone", exact: true }).click();
-
-  const inspector = page.getByLabel("Thread Inspector");
-  await expect(inspector.getByText("CLONE OF CH 01 · SHARED SOURCE")).toBeVisible();
-  await expect(inspector.getByText("LOCKED — ADJUST AT SOURCE")).toBeVisible();
-  await expect(inspector.getByLabel(/sine frequency/i)).toHaveCount(0);
-  await expect(inspector.getByLabel(/level/i)).toHaveCount(0);
-  const cloneNode = page.locator('[data-module-id^="sine-clone-channel-02"]');
-  await cloneNode.getByRole("button", { name: "Output port for CH 02 Clone" }).click();
-  await page.getByRole("button", { name: "CH 02 output terminal incomplete" }).click();
-  await expect(inspector.getByText("ROUTED", { exact: true })).toBeVisible();
-  await expect(page.locator('.channel-output-terminal[data-channel-id="channel-02"] .channel-terminal-source-tag')).toHaveText("CH 02 Clone");
-
-  await page.locator('[data-module-id^="sine-source-channel-01"] .module-body').click();
+test("Sound Desk Multi-Plot shares one source, drags live, removes independently, and keeps Duplicate distinct", async ({ page }) => {
+  test.setTimeout(90_000);
+  await page.getByRole("button", { name: "Place CH 01 sine generator in Threads" }).click();
+  await expect(page.getByRole("button", { name: "Clone", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Duplicate", exact: true })).toBeVisible();
   await page.getByLabel("CH 01 sine frequency").fill("70");
   await page.getByRole("button", { name: "CH 01 start sine signal" }).click();
-  await expect.poll(() => page.evaluate(() => {
-    const runtime = (window as typeof window & { __rfeAudioRuntime: { getSoundingChannelIds(): string[] } }).__rfeAudioRuntime;
-    return runtime.getSoundingChannelIds().sort();
-  })).toEqual(["channel-01", "channel-02"]);
-  await expect(page.getByLabel("Layered signal monitor active with 2 sounding channels")).toHaveAttribute("data-trace-count", "2");
-  await expect(page.getByLabel("Layered signal monitor active with 2 sounding channels")).toContainText("LAYERED VIEW · 2 TRACES");
-  await page.locator('[data-module-id^="sine-clone-channel-02"] .module-body').click();
-  await expect(inspector.getByText("70 Hz", { exact: true })).toBeVisible();
-  await expect(inspector.getByText("LEVEL 20%", { exact: true })).toBeVisible();
-  await expect(inspector.getByText("POSITION + LIVE TRIM AT SOUND DESK", { exact: true })).toBeVisible();
-  await expect(inspector.getByRole("button", { name: "Quick Delete" })).toBeEnabled();
+  await page.getByRole("button", { name: "Go to Sound Desk" }).click();
 
-  await page.locator('[data-module-id^="sine-source-channel-01"] .module-body').click();
+  await page.getByRole("button", { name: "PLOT MODES" }).click();
+  await expect(page.getByRole("button", { name: /AUTO PLOT/ })).toBeDisabled();
+  await expect(page.getByRole("button", { name: /ORCHESTRA/ })).toBeDisabled();
+  await page.getByRole("button", { name: "Close Plotter modes" }).click();
+
+  const diagnostics = () => page.evaluate(() => {
+    const runtime = (window as typeof window & { __rfeAudioRuntime: { getDiagnostics(): Record<string, number>; getActiveChannelIds(): string[]; getSoundingChannelIds(): string[]; getChannelSnapshot(id: string): { frequency: number; liveTrim: number; pan: number; active: boolean } } }).__rfeAudioRuntime;
+    const ids = runtime.getActiveChannelIds().sort();
+    return { diagnostics: runtime.getDiagnostics(), ids, soundingIds: runtime.getSoundingChannelIds().sort(), snapshots: ids.map((id) => ({ id, ...runtime.getChannelSnapshot(id) })) };
+  });
+  const beforeMultiPlot = await diagnostics();
+  for (let count = 0; count < 4; count += 1) await page.getByRole("button", { name: /MULTI-PLOT/ }).click();
+  const grid = page.getByRole("grid", { name: "Sound Desk shared 5 by 5 spatial grid" });
+  await expect(grid.locator(".spatial-plot-node")).toHaveCount(5);
+  await expect.poll(async () => (await diagnostics()).ids.length).toBe(5);
+  const afterMultiPlot = await diagnostics();
+  expect(afterMultiPlot.diagnostics).toMatchObject({ activeSources: 1, sourceCreations: beforeMultiPlot.diagnostics.sourceCreations, channelCreations: beforeMultiPlot.diagnostics.channelCreations + 4 });
+  expect(afterMultiPlot.snapshots.every((snapshot) => snapshot.frequency === 70 && snapshot.active)).toBe(true);
+
+  const plotB = grid.locator('[data-plot-id^="channel-01-plot-"]').first();
+  const plotBId = await plotB.getAttribute("data-plot-id");
+  const gridBox = await grid.boundingBox();
+  const plotBox = await plotB.boundingBox();
+  expect(gridBox).not.toBeNull();
+  expect(plotBox).not.toBeNull();
+  const graphBeforeDrag = await diagnostics();
+  await page.mouse.move(plotBox!.x + plotBox!.width / 2, plotBox!.y + plotBox!.height / 2);
+  await page.mouse.down();
+  const targetPoint = grid.locator('[data-coordinate="2,2"]');
+  const targetBox = await targetPoint.boundingBox();
+  expect(targetBox).not.toBeNull();
+  await page.mouse.move(targetBox!.x + targetBox!.width / 2, targetBox!.y + targetBox!.height / 2, { steps: 18 });
+  await page.mouse.up();
+  await expect.poll(() => page.evaluate((id) => (window as typeof window & { __rfeAudioRuntime: { getChannelSnapshot(channelId: string): { pan: number } } }).__rfeAudioRuntime.getChannelSnapshot(id!).pan, plotBId)).toBeGreaterThan(.65);
+  const graphAfterDrag = await diagnostics();
+  const snappedPlotBox = await plotB.boundingBox();
+  expect(snappedPlotBox).not.toBeNull();
+  expect(Math.abs((snappedPlotBox!.x + snappedPlotBox!.width / 2) - (targetBox!.x + targetBox!.width / 2))).toBeLessThan(1);
+  expect(Math.abs((snappedPlotBox!.y + snappedPlotBox!.height / 2) - (targetBox!.y + targetBox!.height / 2))).toBeLessThan(1);
+  expect(graphAfterDrag.diagnostics).toMatchObject({ sourceCreations: graphBeforeDrag.diagnostics.sourceCreations, channelCreations: graphBeforeDrag.diagnostics.channelCreations, analyserCreations: graphBeforeDrag.diagnostics.analyserCreations, pannerCreations: graphBeforeDrag.diagnostics.pannerCreations });
+  expect(graphAfterDrag.diagnostics.smoothingRamps).toBeGreaterThan(graphBeforeDrag.diagnostics.smoothingRamps);
+
+  const movedPlotBox = await plotB.boundingBox();
+  expect(movedPlotBox).not.toBeNull();
+  await page.mouse.move(movedPlotBox!.x + movedPlotBox!.width / 2, movedPlotBox!.y + movedPlotBox!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(gridBox!.x - 18, gridBox!.y + gridBox!.height / 2, { steps: 6 });
+  await plotB.dispatchEvent("pointercancel", { pointerId: 1, clientX: gridBox!.x - 18, clientY: gridBox!.y + gridBox!.height / 2 });
+  await page.mouse.up();
+  await expect(plotB).toBeVisible();
+  const postCancelBox = await plotB.boundingBox();
+  expect(postCancelBox).not.toBeNull();
+  await page.mouse.move(postCancelBox!.x + postCancelBox!.width / 2, postCancelBox!.y + postCancelBox!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(gridBox!.x + gridBox!.width / 2, gridBox!.y + gridBox!.height / 2, { steps: 8 });
+  await page.mouse.up();
+  await expect.poll(() => page.evaluate((id) => (window as typeof window & { __rfeAudioRuntime: { getChannelSnapshot(channelId: string): { pan: number } } }).__rfeAudioRuntime.getChannelSnapshot(id!).pan, plotBId)).toBeCloseTo(0, 1);
+  const stackedNodes = grid.locator('.spatial-plot-node[data-stack-size="2"]');
+  await expect(stackedNodes).toHaveCount(2);
+  await expect(stackedNodes.nth(0)).toHaveAttribute("data-stack-index", "1");
+  await expect(stackedNodes.nth(1)).toHaveAttribute("data-stack-index", "2");
+  await expect(stackedNodes.nth(1)).toHaveAttribute("aria-label", /stack 2 of 2/);
+  const firstStackBox = await stackedNodes.nth(0).boundingBox();
+  const secondStackBox = await stackedNodes.nth(1).boundingBox();
+  expect(firstStackBox).not.toBeNull();
+  expect(secondStackBox).not.toBeNull();
+  expect(Math.abs((firstStackBox!.x + firstStackBox!.width / 2) - (secondStackBox!.x + secondStackBox!.width / 2))).toBeGreaterThanOrEqual(7);
+  const graphAfterInterruptedDrag = await diagnostics();
+  expect(graphAfterInterruptedDrag.diagnostics).toMatchObject({ sourceCreations: graphBeforeDrag.diagnostics.sourceCreations, channelCreations: graphBeforeDrag.diagnostics.channelCreations, analyserCreations: graphBeforeDrag.diagnostics.analyserCreations, pannerCreations: graphBeforeDrag.diagnostics.pannerCreations });
+
+  const plotCRowSelect = page.getByRole("button", { name: "CH 01 · PLOT C", exact: true });
+  await plotCRowSelect.click();
+  await page.getByRole("button", { name: "Plot route" }).click();
+  const folderTrigger = page.getByRole("button", { name: "Open plot point folder for (0,0) with 3 endpoints" });
+  await expect(folderTrigger).toBeVisible();
+  await folderTrigger.click();
+  const plotFolder = page.getByLabel("Plot point folder 0,0");
+  await expect(plotFolder).toContainText("3 ENDPOINTS");
+  await expect(plotFolder.locator("[data-folder-plot-id]")).toHaveCount(3);
+  await expect(plotFolder.locator("[data-folder-plot-id]").first()).toContainText("PLOT C");
+  await plotFolder.getByRole("button", { name: "Send CH 01 · PLOT C backward" }).click();
+  await expect(plotFolder.locator("[data-folder-plot-id]").first()).toContainText("PLOT B");
+  await plotFolder.locator('[data-folder-plot-id="channel-01"] .plot-folder-select').click();
+  await expect(plotFolder.locator('[data-folder-plot-id="channel-01"]')).toHaveClass(/selected/);
+
+  const folderBox = await folderTrigger.boundingBox();
+  const clusterTarget = grid.locator('[data-coordinate="1,1"]');
+  const clusterTargetBox = await clusterTarget.boundingBox();
+  expect(folderBox).not.toBeNull();
+  expect(clusterTargetBox).not.toBeNull();
+  await page.mouse.move(folderBox!.x + folderBox!.width / 2, folderBox!.y + folderBox!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(clusterTargetBox!.x + clusterTargetBox!.width / 2, clusterTargetBox!.y + clusterTargetBox!.height / 2, { steps: 12 });
+  await page.mouse.up();
+  const movedFolderTrigger = page.getByRole("button", { name: "Open plot point folder for (1,1) with 3 endpoints" });
+  await expect(movedFolderTrigger).toBeVisible();
+  await movedFolderTrigger.click();
+  const movedPlotFolder = page.getByLabel("Plot point folder 1,1");
+  await expect(movedPlotFolder).toContainText("Double-click any member to pull it free");
+  const selectedFolderMember = movedPlotFolder.locator('[data-folder-plot-id="channel-01"] .plot-folder-select');
+  await selectedFolderMember.click();
+  await selectedFolderMember.dblclick();
+  const pulledFreeRoot = grid.locator('.spatial-plot-node.quick-detached[data-plot-id="channel-01"]');
+  await expect(pulledFreeRoot).toBeVisible();
+  const pulledFreeBox = await pulledFreeRoot.boundingBox();
+  const individualTarget = grid.locator('[data-coordinate="-1,1"]');
+  const individualTargetBox = await individualTarget.boundingBox();
+  expect(pulledFreeBox).not.toBeNull();
+  expect(individualTargetBox).not.toBeNull();
+  await page.mouse.move(pulledFreeBox!.x + pulledFreeBox!.width / 2, pulledFreeBox!.y + pulledFreeBox!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(individualTargetBox!.x + individualTargetBox!.width / 2, individualTargetBox!.y + individualTargetBox!.height / 2, { steps: 10 });
+  await page.mouse.up();
+  const rootPlotRow = page.locator('.plotter-channel-row[data-plot-id="channel-01"]');
+  await expect(rootPlotRow).toContainText("(-1,1)");
+  await expect(page.getByRole("button", { name: /Open plot point folder/ })).toHaveCount(0);
+
+  const plotCSlider = page.getByRole("slider", { name: "CH 01 · PLOT C Live Trim" });
+  await plotCSlider.fill("-50");
+  const plotCRow = page.locator(".plotter-channel-row").filter({ has: page.getByRole("button", { name: "CH 01 · PLOT C", exact: true }) });
+  await plotCRow.getByRole("button", { name: "MUTE", exact: true }).click();
+  await expect(page.getByRole("slider", { name: "CH 01 · PLOT C Live Trim" })).toHaveValue("-100");
+  await page.getByRole("button", { name: "Remove CH 01 · PLOT C" }).click();
+  await expect(grid.locator(".spatial-plot-node")).toHaveCount(4);
+  await expect.poll(async () => (await diagnostics()).ids.length).toBe(4);
+  expect((await diagnostics()).diagnostics.activeSources).toBe(1);
+
+  const endpointMutes = page.locator(".plotter-channel-row .plot-mute-action");
+  await expect(endpointMutes).toHaveCount(4);
+  for (let index = 0; index < 4; index += 1) await endpointMutes.nth(index).click();
+  await expect.poll(async () => (await diagnostics()).soundingIds).toEqual([]);
+  for (let index = 0; index < 4; index += 1) await endpointMutes.nth(index).click();
+
+  await page.getByRole("button", { name: "Go to Threads" }).click();
+  const sourceNode = page.locator('[data-module-id^="pitched-generator-channel-01"]');
+  await sourceNode.locator(".module-body").click();
+  await page.getByLabel("CH 01 sine frequency").fill("333");
+  await expect.poll(async () => (await diagnostics()).snapshots.every((snapshot) => snapshot.frequency === 333)).toBe(true);
   await page.getByRole("button", { name: "Duplicate", exact: true }).click();
-  const duplicateNode = page.locator('[data-module-id^="sine-source-channel-03"]');
-  await duplicateNode.getByRole("button", { name: "Output port for CH 03 Sine" }).click();
-  await page.getByRole("button", { name: "CH 03 output terminal incomplete" }).click();
-  await page.getByRole("button", { name: "CH 03 start sine signal" }).click();
-  await expect.poll(() => page.evaluate(() => (window as typeof window & { __rfeAudioRuntime: { getSoundingChannelIds(): string[] } }).__rfeAudioRuntime.getSoundingChannelIds().sort())).toEqual(["channel-01", "channel-02", "channel-03"]);
+  const duplicateNode = page.locator('[data-module-id^="pitched-generator-channel-02"]');
+  await duplicateNode.getByRole("button", { name: "Output port for CH 02 Sine" }).click();
+  await page.getByRole("button", { name: "CH 02 output terminal incomplete" }).click();
+  await page.getByLabel("CH 02 sine frequency").fill("440");
+  await page.getByRole("button", { name: "CH 02 start sine signal" }).click();
+  await expect.poll(async () => (await diagnostics()).diagnostics.activeSources).toBe(2);
+  expect((await diagnostics()).snapshots.some((snapshot) => snapshot.id === "channel-02" && snapshot.frequency === 440)).toBe(true);
+  expect((await diagnostics()).soundingIds).toContain("channel-02");
+  await page.getByRole("button", { name: "Go to Sound Desk" }).click();
+  expect((await diagnostics()).soundingIds).not.toContain("channel-02");
+  await page.getByRole("button", { name: "Go to Threads" }).click();
 
-  await page.locator('[data-module-id^="sine-source-channel-01"] .module-body').click();
+  await sourceNode.locator(".module-body").click();
   await page.getByRole("button", { name: "DELETE SOURCE…" }).click();
-  await expect(inspector.getByRole("alert")).toContainText("Unrelated sources keep playing");
-  await expect.poll(() => page.evaluate(() => (window as typeof window & { __rfeAudioRuntime: { getSoundingChannelIds(): string[]; getSessionPlaybackState(): string } }).__rfeAudioRuntime.getSoundingChannelIds().sort())).toEqual(["channel-01", "channel-02", "channel-03"]);
+  await expect(page.getByRole("alert")).toContainText("associated Multi-Plot");
+  await expect(page.getByRole("alert")).toContainText("Unrelated sources and Duplicates keep playing");
   await page.getByRole("button", { name: "CANCEL" }).click();
-  await expect.poll(() => page.evaluate(() => (window as typeof window & { __rfeAudioRuntime: { getSoundingChannelIds(): string[] } }).__rfeAudioRuntime.getSoundingChannelIds().sort())).toEqual(["channel-01", "channel-02", "channel-03"]);
-
-  await page.getByRole("button", { name: "DELETE SOURCE…" }).click();
-  await page.getByRole("button", { name: "DELETE SOURCE + ALL CLONES" }).click();
-  await expect.poll(() => page.evaluate(() => (window as typeof window & { __rfeAudioRuntime: { getSoundingChannelIds(): string[] } }).__rfeAudioRuntime.getSoundingChannelIds())).toEqual(["channel-03"]);
-  await expect(duplicateNode).toBeVisible();
 });
 
 test("a source can mix and match with any free Channel Out", async ({ page }) => {
   await page.getByRole("button", { name: "ADD CHANNEL" }).click();
-  await page.getByRole("button", { name: "Place CH 02 sine source in Threads" }).click();
+  await page.getByRole("button", { name: "Place CH 02 sine generator in Threads" }).click();
   await page.getByRole("button", { name: "Disconnect CH 01 output" }).click();
-  const source = page.locator('[data-module-id^="sine-source-channel-02"]');
+  const source = page.locator('[data-module-id^="pitched-generator-channel-02"]');
   await source.getByRole("button", { name: "Output port for CH 02 Sine" }).click();
   await page.getByRole("button", { name: "CH 01 output terminal incomplete" }).click();
   await expect(page.getByLabel("CH 01 output complete")).toBeVisible();
@@ -749,8 +961,7 @@ test("a source can mix and match with any free Channel Out", async ({ page }) =>
   await expect(page.getByRole("button", { name: "CH 01 · incomplete" })).toBeDisabled();
 });
 
-test("M11 dense 25-position qualification keeps routing, transport, Monitor, Clone, and Duplicate truth", async ({ page }) => {
-  test.setTimeout(240_000);
+test("M12 dense 25-endpoint fixture keeps Multi-Plot, Duplicate, routing, transport, and Monitor truth", async ({ page }) => {
   const consoleErrors: string[] = [];
   const pageErrors: string[] = [];
   page.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text()); });
@@ -762,38 +973,32 @@ test("M11 dense 25-position qualification keeps routing, transport, Monitor, Clo
     const label = `CH ${String(sequence).padStart(2, "0")}`;
     await page.getByRole("slider", { name: `${label} sine frequency` }).fill(String(frequencies[sequence - 1]));
     await page.getByRole("slider", { name: `${label} level` }).fill("2");
-    await page.getByRole("button", { name: `Place ${label} sine source in Threads` }).click();
+    await page.getByRole("button", { name: `Place ${label} sine generator in Threads` }).click();
     if (sequence > 1) {
-      const source = page.locator(`[data-module-id^="sine-source-channel-${String(sequence).padStart(2, "0")}"]`);
+      const source = page.locator(`[data-module-id^="pitched-generator-channel-${String(sequence).padStart(2, "0")}"]`);
       await source.getByRole("button", { name: `Output port for ${label} Sine` }).click();
       await page.getByRole("button", { name: `${label} output terminal incomplete` }).click();
     }
   }
 
-  const rootOne = page.locator('[data-module-id^="sine-source-channel-01"]');
-  for (let clone = 0; clone < 4; clone += 1) {
-    await rootOne.locator(".module-body").evaluate((element: HTMLElement) => element.click());
-    await page.getByRole("button", { name: "Clone", exact: true }).click();
-  }
-  const rootTwo = page.locator('[data-module-id^="sine-source-channel-02"]');
+  const rootTwo = page.locator('[data-module-id^="pitched-generator-channel-02"]');
   for (let duplicate = 0; duplicate < 4; duplicate += 1) {
     await rootTwo.locator(".module-body").evaluate((element: HTMLElement) => element.click());
     await page.getByRole("button", { name: "Duplicate", exact: true }).click();
   }
-  await expect(page.locator('[data-module-type="sine-source"]')).toHaveCount(25);
+  await expect(page.locator('[data-module-type="pitched-generator"]')).toHaveCount(21);
 
-  for (let sequence = 18; sequence <= 25; sequence += 1) {
+  for (let sequence = 18; sequence <= 21; sequence += 1) {
     const label = `CH ${String(sequence).padStart(2, "0")}`;
-    const title = sequence <= 21 ? `${label} Clone` : `${label} Sine`;
-    const source = page.locator(`[data-module-id^="sine-${sequence <= 21 ? "clone" : "source"}-channel-${String(sequence).padStart(2, "0")}"]`);
-    await source.getByRole("button", { name: `Output port for ${title}` }).evaluate((element: HTMLElement) => element.click());
+    const source = page.locator(`[data-module-id^="pitched-generator-channel-${String(sequence).padStart(2, "0")}"]`);
+    await source.getByRole("button", { name: `Output port for ${label} Sine` }).evaluate((element: HTMLElement) => element.click());
     await page.getByRole("button", { name: `${label} output terminal incomplete` }).click();
   }
 
-  const startSequences = [...Array.from({ length: 17 }, (_, index) => index + 1), 22, 23, 24, 25];
+  const startSequences = Array.from({ length: 21 }, (_, index) => index + 1);
   for (const sequence of startSequences) {
     const label = `CH ${String(sequence).padStart(2, "0")}`;
-    const source = page.locator(`[data-module-id^="sine-source-channel-${String(sequence).padStart(2, "0")}"]`);
+    const source = page.locator(`[data-module-id^="pitched-generator-channel-${String(sequence).padStart(2, "0")}"]`);
     await source.locator(".module-body").evaluate((element: HTMLElement) => element.click());
     await page.getByRole("button", { name: `${label} start sine signal` }).click();
     await expect(page.getByRole("button", { name: `${label} stop sine signal` })).toBeVisible();
@@ -802,31 +1007,51 @@ test("M11 dense 25-position qualification keeps routing, transport, Monitor, Clo
   await expect.poll(() => page.evaluate(() => {
     const runtime = (window as typeof window & { __rfeAudioRuntime: { getDiagnostics(): { activeChannels: number; activeSources: number; contextCreations: number; masterCreations: number; safetyCreations: number }; getActiveChannelIds(): string[]; getSoundingChannelIds(): string[] } }).__rfeAudioRuntime;
     return { ...runtime.getDiagnostics(), activeEndpoints: runtime.getActiveChannelIds().length, soundingEndpoints: runtime.getSoundingChannelIds().length };
-  }), { timeout: 20_000 }).toMatchObject({ activeChannels: 25, activeSources: 21, activeEndpoints: 25, soundingEndpoints: 25, contextCreations: 1, masterCreations: 1, safetyCreations: 1 });
+  }), { timeout: 20_000 }).toMatchObject({ activeChannels: 21, activeSources: 21, activeEndpoints: 21, soundingEndpoints: 21, contextCreations: 1, masterCreations: 1, safetyCreations: 1 });
 
   await page.getByRole("button", { name: "Go to Sound Desk" }).click();
+  await page.getByRole("button", { name: "CH 01 · complete and routable" }).click();
+  for (let plot = 0; plot < 4; plot += 1) await page.getByRole("button", { name: /MULTI-PLOT/ }).click();
+  await expect.poll(() => page.evaluate(() => {
+    const runtime = (window as typeof window & { __rfeAudioRuntime: { getDiagnostics(): { activeChannels: number; activeSources: number }; getSoundingChannelIds(): string[] } }).__rfeAudioRuntime;
+    return { ...runtime.getDiagnostics(), soundingEndpoints: runtime.getSoundingChannelIds().length };
+  })).toMatchObject({ activeChannels: 25, activeSources: 21, soundingEndpoints: 5 });
   const coordinates = [
     "-2,2", "-1,2", "0,2", "1,2", "2,2", "-2,1", "-1,1", "0,1", "1,1", "2,1",
     "-2,0", "-1,0", "0,0", "1,0", "2,0", "-2,-1", "-1,-1", "0,-1", "1,-1", "2,-1",
     "-2,-2", "-1,-2", "0,-2", "1,-2", "2,-2",
   ];
-  for (let sequence = 1; sequence <= 25; sequence += 1) {
+  for (let sequence = 1; sequence <= 21; sequence += 1) {
     const label = `CH ${String(sequence).padStart(2, "0")}`;
     await page.getByRole("button", { name: `${label} · complete and routable` }).click();
     await page.getByRole("grid", { name: "Sound Desk shared 5 by 5 spatial grid" }).locator(`[data-coordinate="${coordinates[sequence - 1]}"]`).click();
     await page.getByRole("button", { name: "Plot route" }).click();
   }
-  await expect(page.locator(".spatial-channel-node")).toHaveCount(25);
+  for (let plotNumber = 2; plotNumber <= 5; plotNumber += 1) {
+    const suffix = String.fromCharCode(64 + plotNumber);
+    await page.getByRole("button", { name: `CH 01 · PLOT ${suffix}`, exact: true }).click();
+    await page.getByRole("grid", { name: "Sound Desk shared 5 by 5 spatial grid" }).locator(`[data-coordinate="${coordinates[19 + plotNumber]}"]`).click();
+    await page.getByRole("button", { name: "Plot route" }).click();
+  }
+  await expect(page.locator(".spatial-plot-node")).toHaveCount(25);
+  await expect.poll(() => page.evaluate(() => (window as typeof window & { __rfeAudioRuntime: { getSoundingChannelIds(): string[] } }).__rfeAudioRuntime.getSoundingChannelIds().length)).toBe(25);
+  await expect(page.getByLabel("Sound Desk endpoint load tally")).toHaveText("SOUNDING 25 / 25 ENDPOINTS · 21 SOURCES");
 
-  for (const [first, second] of [[1, 2], [18, 19], [22, 23]]) {
+  for (const [first, second] of [[1, 2], [18, 19]]) {
     for (const [sequence, coordinate] of [[first, coordinates[second - 1]], [second, coordinates[first - 1]]]) {
       const label = `CH ${String(sequence).padStart(2, "0")}`;
       await page.getByRole("button", { name: `${label} · complete and routable` }).click();
-      await page.getByRole("grid", { name: "Sound Desk shared 5 by 5 spatial grid" }).locator(`[data-coordinate="${coordinate}"]`).click();
+      await page.getByRole("grid", { name: "Sound Desk shared 5 by 5 spatial grid" }).locator(`[data-coordinate="${coordinate}"]`).click({ position: { x: 5, y: 5 } });
       await page.getByRole("button", { name: "Plot route" }).click();
     }
   }
-  await expect(page.locator(".spatial-channel-node")).toHaveCount(25);
+  await page.getByRole("button", { name: "CH 01 · PLOT B", exact: true }).click();
+  await page.getByRole("grid", { name: "Sound Desk shared 5 by 5 spatial grid" }).locator('[data-coordinate="0,-2"]').click({ position: { x: 5, y: 5 } });
+  await page.getByRole("button", { name: "Plot route" }).click();
+  await page.getByRole("button", { name: "CH 01 · PLOT C", exact: true }).click();
+  await page.getByRole("grid", { name: "Sound Desk shared 5 by 5 spatial grid" }).locator('[data-coordinate="-1,-2"]').click({ position: { x: 5, y: 5 } });
+  await page.getByRole("button", { name: "Plot route" }).click();
+  await expect(page.locator(".spatial-plot-node")).toHaveCount(25);
 
   const sourceCreations = await page.evaluate(() => (window as typeof window & { __rfeAudioRuntime: { getDiagnostics(): { sourceCreations: number } } }).__rfeAudioRuntime.getDiagnostics().sourceCreations);
   for (let cycle = 0; cycle < 12; cycle += 1) {
@@ -837,20 +1062,28 @@ test("M11 dense 25-position qualification keeps routing, transport, Monitor, Clo
   expect(await page.evaluate(() => (window as typeof window & { __rfeAudioRuntime: { getDiagnostics(): { sourceCreations: number; contextCreations: number; safetyCreations: number } } }).__rfeAudioRuntime.getDiagnostics())).toMatchObject({ sourceCreations, contextCreations: 1, safetyCreations: 1 });
 
   await page.getByRole("button", { name: "Go to Threads" }).click();
-  for (const sequence of [18, 22, 3]) {
+  for (const sequence of [18, 3]) {
     const label = `CH ${String(sequence).padStart(2, "0")}`;
     await page.getByRole("button", { name: `Disconnect ${label} output` }).click();
     await expect.poll(() => page.evaluate((channelId) => !(window as typeof window & { __rfeAudioRuntime: { getSoundingChannelIds(): string[] } }).__rfeAudioRuntime.getSoundingChannelIds().includes(channelId), `channel-${String(sequence).padStart(2, "0")}`)).toBe(true);
   }
-  for (const sequence of [3, 22, 18]) {
+  for (const sequence of [3, 18]) {
     const label = `CH ${String(sequence).padStart(2, "0")}`;
-    const type = sequence === 18 ? "clone" : "source";
-    const title = sequence === 18 ? `${label} Clone` : `${label} Sine`;
-    const source = page.locator(`[data-module-id^="sine-${type}-channel-${String(sequence).padStart(2, "0")}"]`);
-    await source.getByRole("button", { name: `Output port for ${title}` }).evaluate((element: HTMLElement) => element.click());
+    const source = page.locator(`[data-module-id^="pitched-generator-channel-${String(sequence).padStart(2, "0")}"]`);
+    await source.getByRole("button", { name: `Output port for ${label} Sine` }).evaluate((element: HTMLElement) => element.click());
     await page.getByRole("button", { name: `${label} output terminal incomplete` }).click();
   }
   await expect.poll(() => page.evaluate(() => (window as typeof window & { __rfeAudioRuntime: { getSoundingChannelIds(): string[] } }).__rfeAudioRuntime.getSoundingChannelIds().length)).toBe(25);
+  await page.getByRole("button", { name: "Go to Sound Desk" }).click();
+  await expect.poll(() => page.evaluate(() => (window as typeof window & { __rfeAudioRuntime: { getSoundingChannelIds(): string[] } }).__rfeAudioRuntime.getSoundingChannelIds().length)).toBe(23);
+  for (const [sequence, coordinate] of [[3, "0,2"], [18, "1,-1"]] as const) {
+    const label = `CH ${String(sequence).padStart(2, "0")}`;
+    await page.getByRole("button", { name: `${label} · complete and routable` }).click();
+    await page.getByRole("grid", { name: "Sound Desk shared 5 by 5 spatial grid" }).locator(`[data-coordinate="${coordinate}"]`).click();
+    await page.getByRole("button", { name: "Plot route" }).click();
+  }
+  await expect.poll(() => page.evaluate(() => (window as typeof window & { __rfeAudioRuntime: { getSoundingChannelIds(): string[] } }).__rfeAudioRuntime.getSoundingChannelIds().length)).toBe(25);
+  await page.getByRole("button", { name: "Go to Threads" }).click();
   await expect(page.getByLabel("Layered signal monitor active with 25 sounding channels")).toContainText("LAYERED VIEW · 25 TRACES");
   await expect(page.getByLabel("Layered signal monitor active with 25 sounding channels")).toHaveAttribute("data-trace-count", "25");
   await expect(page.locator(".signal-monitor canvas")).toHaveCount(1);

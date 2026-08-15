@@ -3,20 +3,20 @@ RFE PROTOTYPE TEST-BED — PROJECT HANDOVER
 1. PROJECT STATE
 
 State:
-- APPROVED THROUGH: Milestone 11.
-- QUALIFIED BATCH: M10 / M10.1 / M11, including accepted browser-regression remediation and diagnostic history.
+- APPROVED THROUGH: Milestone 13 (M12–M13 hard-save publication authorised 2026-08-15).
+- QUALIFIED BATCH: M10 / M10.1 / M11 / M12 / M13, including accepted browser-regression remediation and diagnostic history.
 - Authoritative branch: `milestone/ui-interaction-harness`.
 - Qualified implementation commit: `7cf92aa7b61b9363d67eb332275f1a258c5c103c`.
 - Previous approved M09: `9af3b8d5d64f8a1bdfbb34f01828c2003a24b314`, preserved in ancestry.
 - Historical review branch: `review/m10-safety-audit` at the qualified implementation commit; it is review evidence, not development authority.
-- Current development phase: hard-save complete/context close. M12 is NOT STARTED.
-- Handover updated: 2026-08-14 (Europe/London).
+- Current development phase: M13 musical-source architecture, generator expansion, recording-safe Multi-Plot delivery, and cluster workflow are user-accepted on `agent/milestone-13` and authorised for promotion to the authoritative branch.
+- Handover updated: 2026-08-15 (Europe/London).
 
 Product/runtime authority:
 - PRIMARY PRODUCT TARGET: one locally launchable offline desktop RFE Test Engine.
 - SECONDARY TARGET: a future Tablet Compact version derived from the same authoritative project lineage.
 - CURRENT BROWSER BUILD: development/prototyping runtime only; Safari/WebKit is not the architectural authority for the final audio engine.
-- NEXT DEVELOPMENT PHASE: M12+ through small, isolated milestones. M12 is NOT STARTED, and any provisional later roadmap is not a committed requirement.
+- NEXT DEVELOPMENT PHASE: await the explicit M14 brief. Do not infer or begin later roadmap work from the M12–M13 acceptance.
 - Do not create Safari-, Chromium-, desktop-, or tablet-specific duplicate project engines. A future hosted/browser product would require its own separately approved architecture.
 
 The accepted local audio configuration uses native Web Audio compression/sample fencing plus a colour-coded layered endpoint waveform at a bounded 30 Hz visual rate. The custom AudioWorklet implementation is preserved, but Safari testing isolated it as the source of progressive crackle/latency and delayed transport. Worklet master-meter reporting, non-finite latching and the eventual offline desktop safety boundary are deferred for a later explicit decision. Channel deletion now uses a non-blocking inline confirmation and preserves unrelated sounding channels.
@@ -196,10 +196,10 @@ Run from the repository root with Node.js 22.13+ and pnpm 11.16.0:
    Expected: vinext production build succeeds.
 
 4. `node --experimental-strip-types --test tests/*.test.mjs`
-   Expected at handover: 44/44 Node tests pass.
+   Expected at handover: 90/90 Node tests pass.
 
 5. `pnpm exec playwright test`
-   Expected at handover: 13/13 Playwright tests pass, including axe.
+   Expected at handover: 19/19 Playwright tests pass, including axe.
 
 6. `pnpm run test:stress-ui`
    Expected: fixture validation and manual soak instructions.
@@ -208,12 +208,18 @@ Latest completed verification before repository reconciliation:
 - Typecheck: PASS
 - ESLint: PASS
 - Production build: PASS
-- Node tests: PASS, 44/44
-- Playwright/browser tests: PASS, 13/13
+- Node tests: PASS, 90/90
+- Playwright/browser tests: PASS, 19/19
 - axe serious/critical scan: PASS
 - Milestone 08 user audible/interaction acceptance: PASS
 - Milestone 09 user audible/interaction acceptance: PASS
 - Git diff integrity: PASS
+
+Latest M12 first-listening remediation qualification (2026-08-14):
+- Live Multi-Plot creation now connects its already-running source branch at zero gain and ramps it to the requested endpoint gain, removing the graph discontinuity responsible for the reported add-pop.
+- Drag selects the nearest real coordinate-cell centre and shows a target engagement ring; the plot overlay now shares the grid's padded inner coordinate box, removing the increasing non-zero calibration error.
+- A complete source family with no plotted endpoint has a Threads-only audition route so its programming can be trialled before going live spatially. That preview closes when leaving Threads or once any family endpoint is plotted, so it cannot escape Sound Desk mute; muting every plotted endpoint yields zero sounding endpoints.
+- User subsequently completed an overload session beyond a practical performance load and accepted M12 as flawless: no latency, glitches, distortion, workspace/transport issues, fader faults, or disconnection faults were reported.
 
 Manual audio confidence check:
 - Begin with conservative headphone/speaker volume.
@@ -240,25 +246,23 @@ Manual audio confidence check:
 
 11. NEXT INTENDED BATCH
 
-Milestone 10 is an unapproved local candidate under manual testing. Continue only user-directed M10 feedback and bug fixes. Do not promote M10 and do not begin Milestone 11 without explicit approval.
+Milestones 12 and 13 passed user listening/interaction acceptance. On 2026-08-15 the user explicitly authorised this complete batch to become the new GitHub baseline.
 
 Before any next milestone or publication:
-- Read this handover and the Milestone 06–09 notes completely.
-- Preserve the approved Milestone 09 baseline and verify repository state before further work.
-- Preserve the local-only M10 candidate boundary and require explicit approval before promotion.
-- Preserve application/channel/session ownership, stable identity, fixed headroom, relative trim math, X-only pan, Y neutrality, and non-destructive transport.
+- Read this handover and `milestone_notes/milestone_12_sound_desk_multi_plot.txt` completely.
+- Verify repository state from Git rather than folder names and preserve the M13 hard-save lineage.
+- Preserve source/endpoint separation, Duplicate independence, phase-coherent `1 / N` family normalization, debounced recording-safe insertion, native output fencing, endpoint smoothing, and non-destructive transport.
 
 12. INSTRUCTIONS FOR THE NEXT CODING AGENT
 
 A new coding agent must:
-- Read `HANDOVER.txt` and the Milestone 06–09 notes before editing.
+- Read `HANDOVER.txt` and the Milestone 12 and 13 notes before editing.
 - Inspect repository state rather than assuming this handover is perfectly current.
-- Work only on explicitly supplied M10 testing feedback or bug fixes until M10 is approved.
 - Preserve approved interaction, routing, audio isolation and cleanup contracts.
 - Prefer minimal targeted changes over broad refactoring.
 - Run verification in proportion to risk and report baseline failures before attempting broad repairs.
 - Never claim automated browser tests prove human audible quality.
-- Stop at the next milestone's explicit acceptance boundary and wait for user approval before repository reconciliation.
+- Do not begin M14 or later roadmap work without an explicit new brief.
 
 13. BASELINE FINGERPRINT
 
@@ -402,4 +406,33 @@ M11 BASELINE FINGERPRINT — 2026-08-14 09:02:44 BST
 - Architecture: one project lineage; Clone/Duplicate ownership; decoupled Channel Out routing; shared context/session/master path; accepted `native-fence-scope` listening mode; layered endpoint traces; non-blocking deletion confirmation.
 - Known limitations: native fence is not true peak or SPL; worklet meter/non-finite latch is suspended in the accepted listening mode; layered traces are pre-pan/pre-sum endpoint views rather than the final hardware-bound composite; final offline desktop audio boundary remains a future decision.
 - Runtime target: offline desktop first; Tablet Compact second; browser build is a development/prototyping runtime.
-- Next milestone: M12, NOT STARTED; future work must use small isolated milestones.
+- M12 candidate: implemented locally on `agent/milestone-12`; M11 remains the authoritative promoted baseline until explicit M12 approval.
+
+M12 ACCEPTED LOCAL CANDIDATE FINGERPRINT — 2026-08-14
+
+- Status: USER-ACCEPTED, LOCAL, UNCOMMITTED, UNPROMOTED.
+- Candidate branch: `agent/milestone-12`; base/HEAD before candidate changes: `a54e9599e10080a8ad4b325ec78c316faf2f48fd`.
+- Product change: Threads-facing Clone creation is retired; Sound Desk Multi-Plot creates additional independently positioned/muted/trimmed endpoint branches for an existing Channel Out.
+- Audio ownership: Multi-Plots reuse the M10 shared-source family graph, keep one oscillator/source envelope, and retain `1 / sqrt(N)` endpoint family normalization. Duplicate remains an independent source/oscillator.
+- Live drag: pointer-captured, requestAnimationFrame-limited panner modulation with the existing 20 ms AudioParam ramp; no graph reconstruction and no hot-path runtime subscriber notification.
+- Future modes: compact Plotter drawer exposes disabled AUTO PLOT and ORCHESTRA placeholders only.
+- Verification: see `milestone_notes/milestone_12_sound_desk_multi_plot.txt` for the complete candidate qualification and manual acceptance steps.
+- Boundary: user authorised M13 without promoting M12. Do not merge, promote, alter M11 Git authority, or begin M14/later roadmap work without explicit approval.
+
+M13 USER-ACCEPTED HARD-SAVE CANDIDATE FINGERPRINT — 2026-08-15
+
+- Status: USER-ACCEPTED; publication and promotion explicitly authorised 2026-08-15.
+- Candidate branch: `agent/milestone-13`; approved hard-save HEAD remains `a54e9599e10080a8ad4b325ec78c316faf2f48fd`.
+- Product change: one reusable finite pitch instruction now drives the Sine, Triangle, and Saw pitched-generator family through the established lifecycle and routing graph.
+- Ownership: Duplicate copies generator programming then remains independent; Multi-Plot retains one source oscillator and independent spatial endpoints.
+- Small edits: module port targets are 150% of configured size, live Multi-Plot insertion is deliberately staged for recording safety, and Sound Desk exposes an explicit sounding/total/source tally.
+- Post-trial remediation: unchanged Live Trim synchronization no longer cancels the 60 ms live-branch insertion fade; multiply occupied coordinates use a centred visual fan with explicit stack count/position while retaining identical audio coordinates.
+- Second post-trial remediation: live family rebalancing now shares the 60 ms insertion transition across existing and new branches; stacks of three or more open as a Plot Point Folder with explicit FRONT/LAYER/BACK ordering controls.
+- Third post-trial remediation: shared-source endpoints are phase-coherent, so M13 now uses `1 / N` family amplitude normalization instead of the uncorrelated-signal `1 / sqrt(N)` law inherited from M12. Successive live insertions therefore preserve constant summed family gain while the coordinated 60 ms crossfade runs.
+- Fourth post-trial remediation: user listening found the coherent normalization softened but did not eliminate the transient. Live insertion now holds the newly connected branch and the existing family automation unchanged for 10 ms before the coordinated 60 ms crossfade, isolating the browser's graph mutation across several silent render quanta.
+- Fifth post-trial remediation: analysis of the valid original iPad recording showed a continuous 84 Hz Triangle carrier beneath prominent mechanically captured click impulses. The user explicitly prioritised clean live recording over clone delivery speed, so insertion now stages the branch silently for one full second and then uses a coordinated 250 ms zero-slope smoothstep crossfade. The existing family remains unchanged throughout the silent staging interval.
+- Sixth post-trial remediation: user testing exposed temporary amplitude doubling when additions were made faster than the one-second stage. Independent delayed curves could overlap: an earlier clone began entering after a later click had postponed family regulation. Live additions now debounce per source family into one atomic transaction. Every rapid click resets one timer, all pending endpoints remain at zero, delivered endpoints keep their current normalization, and one shared smoothstep crossfade begins only after a full quiet second. A 65-point regression proves summed family gain never exceeds its pre-click value during a two-clone batch.
+- Seventh post-trial remediation: the 3+ Plot Point Folder marker is now a drag handle for its complete co-located cluster. Cluster movement is one atomic spatial-state action and previews every endpoint panner together. It does not bind membership: any folder endpoint can still be selected and routed to another point individually, and REMOVE continues to delete only the chosen Multi-Plot. Model coverage and the production browser journey prove cluster move, individual departure, and independent deletion in sequence.
+- Eighth post-trial remediation: an individual can now be pulled free without the unplot/find/replot detour. Double-click any folder-list member to expose that endpoint as an immediately draggable live plot; the selected member can also be pulled with a double-click on the grid folder marker, and the marker defaults to the front endpoint when none is selected. The route remains live, the remaining occupants stay clustered, and the normal drag workflow commits the detached endpoint to its new coordinate. Browser coverage proves a selected list member can leave a moved three-endpoint cluster independently.
+- Verification: see `milestone_notes/milestone_13_musical_source_architecture.txt` for the full qualification and manual musical acceptance procedure.
+- Acceptance: the final user test found the workflow responsive and user-friendly, with no bad noise or misbehaving functions. M12–M13 is authorised to become the new GitHub baseline. Do not begin M14 without a new explicit brief.

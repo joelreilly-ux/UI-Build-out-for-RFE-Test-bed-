@@ -57,12 +57,14 @@ test("terminal connectivity derives incomplete state and gates plotting eligibil
   assert.equal(isChannelRoutable(state, "channel-02"), true);
 });
 
-test("a channel sine player can be placed once and can use any free Channel Out without changing source identity", () => {
+test("a pitched generator can be placed once and can use any free Channel Out without changing source identity", () => {
   let state = appReducer(createInitialState(), { type: "add-channel" });
-  state = appReducer(state, { type: "place-channel-source", channelId: "channel-02" });
+  state = appReducer(state, { type: "place-channel-source", channelId: "channel-02", generatorType: "triangle" });
   const source = state.modules.find((module) => module.audioChannelId === "channel-02");
   assert.ok(source);
-  assert.equal(source.type, "sine-source");
+  assert.equal(source.type, "pitched-generator");
+  assert.equal(source.generatorType, "triangle");
+  assert.equal(source.title, "CH 02 Triangle");
   assert.deepEqual(source.ports, { input: false, output: true });
 
   const once = state.modules.length;

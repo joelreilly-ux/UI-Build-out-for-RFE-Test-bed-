@@ -50,9 +50,9 @@ pnpm test
 
 ## Milestone boundaries
 
-The approved repository baseline is now Milestone 11 on `milestone/ui-interaction-harness`. M09 remains recoverable at `9af3b8d5d64f8a1bdfbb34f01828c2003a24b314`.
+The approved repository baseline is now Milestone 13 on `milestone/ui-interaction-harness`. M11 remains recoverable at `a54e9599e10080a8ad4b325ec78c316faf2f48fd` and M09 at `9af3b8d5d64f8a1bdfbb34f01828c2003a24b314`.
 
-The qualified M10/M10.1/M11 batch adds Clone/Duplicate semantics and 25-position system qualification. The accepted listening configuration is `?audioDiagnostic=native-fence-scope`, using native Web Audio output compression/sample fencing and one layered analyser trace per sounding endpoint. The preserved custom AudioWorklet path and its master meter are not part of the accepted Safari listening configuration because testing exposed progressive latency. Final metering, non-finite latching and the eventual offline desktop audio boundary are deferred for a later decision. The 50 Hz–10 kHz commissioning range is not a safe-frequency claim; the native fence is not a true-peak or acoustic-SPL guarantee. M12 has not started.
+The M12–M13 batch moves shared-source spatial fan-out into Sound Desk Multi-Plot, adds Sine/Triangle/Saw through one pitch architecture, introduces recording-safe debounced family delivery, explicit endpoint/source tallies, draggable Plot Point Folders, and quick individual pull-free routing. Duplicate remains an independent source. The accepted listening configuration remains `?audioDiagnostic=native-fence-scope`; its native fence is not a true-peak or acoustic-SPL guarantee.
 
 ## Main editing surfaces
 

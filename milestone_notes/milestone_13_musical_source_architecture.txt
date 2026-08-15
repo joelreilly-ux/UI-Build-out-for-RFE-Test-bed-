@@ -1,0 +1,120 @@
+MILESTONE 13 — MUSICAL SOURCE ARCHITECTURE + FIRST GENERATOR EXPANSION
+
+STATUS
+
+USER-ACCEPTED hard-save candidate on `agent/milestone-13`. It preserves the accepted M12 work over M11 hard-save HEAD `a54e9599e10080a8ad4b325ec78c316faf2f48fd`. Publication and promotion to the authoritative GitHub baseline were explicitly authorised on 2026-08-15.
+
+1. VERIFIED START
+
+- Repository root: `/Users/requiredrequired/Documents/Codex/Test Engine. Milestones 03-06/RFE-Test-Engine-M12`.
+- Branch: `agent/milestone-13`.
+- HEAD: `a54e9599e10080a8ad4b325ec78c316faf2f48fd`.
+- Remote: unchanged GitHub `origin`.
+- M12 was preserved as uncommitted working state before the M13 branch was created.
+- Qualification used a rebuilt production server on port 3002 and a fresh in-app browser tab.
+
+2. PREVIOUS ARCHITECTURE
+
+- Frequency validation, oscillator construction, source envelope, programmed level, routing branches, analysers, panners, transport, safety output, and lifecycle lived in `app/audio-runtime.ts`.
+- Oscillator waveform construction was hard-coded to Sine.
+- Threads module type, titles, player controls, Inspector, and Monitor labels were Sine-specific.
+- Duplicate copied runtime frequency/level into a new independent source. Multi-Plot reused one sourceId and created endpoint-only fan-out branches.
+- App snapshots serialized reducer/module state; frequency and live audio state remained runtime state.
+
+3. RESULTING PITCH / GENERATOR MODEL
+
+- `app/musical-source.ts` introduces one finite, clamped, immutable frequency-oriented `PitchInstruction` and one `PitchedGeneratorType` contract.
+- The M13 generator family is exactly Sine, Triangle, and Saw. Saw maps to the native `sawtooth` oscillator type.
+- Every generator consumes the same pitch pathway. Invalid and non-finite pitch values retain a finite validated fallback before reaching AudioParams.
+- Runtime source programming now owns `{ pitch, generatorType, level }`; endpoint programming continues to own trim, pan, and routability.
+- Threads uses one compact generator selector rather than separate cards, keeping the visible graph consistent with the actual single-source audio model.
+
+4. GENERATORS AND REGRESSION
+
+- Sine retains its frequency range/default, level, source-envelope ramps, start/stop behavior, routing, transport, Duplicate behavior, Multi-Plot fan-out, diagnostics, and clear/rebuild lifecycle.
+- Triangle is one native oscillator using the shared pitch/lifecycle/routing contract.
+- Saw is one native sawtooth oscillator using the same contract; no filter, detune, unison, or hidden secondary oscillator was added.
+- Monitor generator identity and module titles now reflect the actual selected generator.
+- Existing analysers remain authoritative. No decorative waveform approximation was introduced.
+
+5. OWNERSHIP AND LIFECYCLE
+
+- Duplicate initially copies pitch, generator type, and level into a new sourceId, then remains independently programmable.
+- Multi-Plot retains the original sourceId and therefore shares pitch, generator, and level while keeping independent position, pan, trim, mute, analyser, and disposal state.
+- Adding a Multi-Plot does not create a source oscillator. The new endpoint is staged at zero for one second, then enters through a coordinated 250 ms zero-slope smoothstep crossfade.
+- All generators retain one shared AudioContext/session gate/master/native output-fence path. Ordinary pitch and spatial updates do not create sources or rebuild the graph.
+- Clear-to-zero disposes active generator sources/endpoints; an immediate Saw rebuild reuses the same application context and master.
+
+6. SMALL M13-ADJACENT EDITS
+
+- Module input/output port hit targets are 150% of the configured visible port size, reducing pointer precision requirements while keeping thread geometry centred.
+- Sound Desk titlebar now shows an explicit live tally: `SOUNDING X / Y ENDPOINTS · Z SOURCES`.
+- Live Multi-Plot insertion is deliberately recording-first: one second of silent graph staging followed by a 250 ms smoothstep family crossfade, with focused scheduling and curve-shape regression coverage.
+
+POST-TRIAL MULTI-PLOT REMEDIATION — 2026-08-15
+
+- User musical testing accepted the M13 generator upgrades but reported that live Multi-Plot additions still popped and that co-located endpoints became visually hidden on a populated grid.
+- Root cause of the ineffective longer fade: topology insertion scheduled the intended 60 ms zero-to-live ramp, then canonical spatial-state synchronization immediately reapplied the already-current Live Trim value. That redundant update cancelled the insertion automation and replaced it with the ordinary 20 ms control ramp.
+- `setLiveTrim` is now idempotent. Reapplying an unchanged canonical value performs no AudioParam scheduling, so the live branch's 60 ms insertion fade survives intact. A focused runtime test proves the final scheduled ramp time remains unchanged after spatial synchronization.
+- This is a mechanical scheduling correction, not another arbitrary fade extension. The source oscillator and source envelope remain uninterrupted and no additional source is created.
+- Co-located plots now receive deterministic, centred visual offsets in a compact square fan. Their audio coordinates remain identical; the offset is presentation-only.
+- Every stacked endpoint exposes `data-stack-index` and `data-stack-size`, its accessible label states its stack position, and the top plot displays the total stack count. Selection raises the addressed endpoint without hiding the remaining stack structure.
+- Focused browser verification proves two plots on `(0,0)` occupy distinct visible centres while retaining the same canonical routing coordinate.
+- A second user trial confirmed the two-plot fan but found corner-based access unsuitable from three occupants upward, and confirmed that the pop remained after the insertion-ramp correction.
+- Live insertion now coordinates the complete family transition: every existing programmed-gain branch uses the same 60 ms interval as the new endpoint instead of retaining the generic 20 ms family-rebalance ramp. This addresses the remaining parallel automation path without restarting the oscillator or manufacturing another source.
+- At three or more occupants, the grid exposes one Plot Point Folder trigger rather than requiring clicks on partially visible endpoints. The Plotter folder lists every occupant in explicit FRONT/LAYER/BACK order with select, bring-forward, and send-back controls.
+- Layer order is canonical spatial presentation state. Reordering a folder does not alter sourceId, coordinate, pan, pitch, generator, Live Trim, mute, or audio-node ownership.
+- Recording inspection was blocked by a malformed/unfinalized QuickTime media index, but the runtime audit exposed a separate gain-law error: every Multi-Plot carries the same phase-coherent oscillator signal while family amplitude used `1 / sqrt(N)`, which is appropriate only for uncorrelated sources and raises the coherent summed level as endpoints are added.
+- Family amplitude normalization is now `1 / N`. Existing branches ramp down while the zero-gain new branch ramps up over the same 60 ms window, preserving the family's summed programmed gain instead of introducing a tone-relative level transient.
+- A regression adds one through five live endpoints and proves that all branches retain one oscillator and their summed programmed gain remains constant at every final topology.
+- User listening confirmed that coherent normalization softened but did not eliminate the insertion transient, separating the level-jump component from the remaining live graph-mutation component.
+- Live insertion now holds the new branch at zero and holds existing family gain unchanged for 10 ms before the coordinated 60 ms crossfade begins. This gives the Web Audio renderer several silent processing quanta to commit the connected branch before it contributes to output.
+- The insertion regression proves the explicit hold event and synchronized fade completion time on both the new branch and the existing family.
+- The original 65.4-second iPad recording decoded successfully. Its spectrogram showed the 84 Hz Triangle harmonics continuing through the Multi-Plot actions while prominent narrow broadband impulses extended to approximately 20 kHz, consistent with the nearby microphone capturing the physical input mechanism at the same instant.
+- The user explicitly accepted delayed clone delivery in exchange for live-recording cleanliness. The earlier 10 ms hold/60 ms linear transition is therefore superseded by a one-second fully silent staging interval and a coordinated 250 ms smoothstep curve with zero slope at both endpoints.
+- The existing family does not rebalance during the one-second staging interval. New and existing branches then use the same shaped curve, preserving coherent `1 / N` summed gain throughout delivery.
+- Rapid user additions revealed that independently scheduled delayed curves could overlap: an earlier endpoint could begin entering after a later click had postponed the existing-family rebalance, temporarily doubling amplitude before normalization caught up.
+- Insertion staging is now a debounced transaction owned by the complete source family. Each rapid addition resets the family's one-second timer; every queued endpoint remains at zero programmed/trim output and delivered endpoints remain unchanged until no further addition arrives for a full second.
+- The transaction assigns silent pending branches their final programmed gain, then applies one shared 250 ms smoothstep to delivered-family normalization and every pending Live Trim. No endpoint retains an autonomous delayed curve.
+- A focused rapid-addition regression queues two endpoints, proves the first timer is cancelled, confirms both branches remain silent before delivery, and samples all 65 curve points to prove summed family gain remains equal to the original gain without temporary overshoot.
+- User testing found that the 3+ Plot Point Folder trigger prevented dragging the occupied coordinate. The folder trigger now acts as a cluster drag handle and previews every member's panner together before committing one atomic `move-plot-stack` spatial action.
+- Cluster movement preserves every endpoint's sourceId, pitch/generator ownership, Live Trim, mute, analyser, plot number, and layer order. It is an operation rather than a permanent grouping contract.
+- Folder guidance makes the escape paths explicit: select one member, choose another grid coordinate, and Plot route to move it independently; REMOVE still destroys only the selected Multi-Plot endpoint.
+- Model and production-browser coverage move a three-endpoint folder, route one member out so the residual cluster collapses to two, and delete another member without altering the survivor or source oscillator.
+- The individual escape workflow no longer requires unplotting and finding the endpoint again. Double-click any member in the Plot Point Folder to pull that live endpoint into an exposed, dashed-outline drag target. The selected member can also be pulled by double-clicking the grid folder marker; if no member in that folder is selected, the front endpoint is used.
+- Pull-free is presentation state rather than a routing or audio mutation. The endpoint remains live at its original coordinate until normal dragging commits a new coordinate, while the remaining occupants continue to render as their own cluster. Focused browser coverage selects a member from a moved three-endpoint folder, pulls it free, drags it independently, and verifies the folder collapses cleanly.
+
+7. VERIFICATION
+
+- TypeScript: PASS.
+- ESLint: PASS with no warnings.
+- Production vinext build: PASS.
+- Node/model/runtime/render tests: PASS, 90/90.
+- Playwright browser tests: PASS, 19/19.
+- Accessibility: PASS; axe reports no serious or critical violations.
+- Dense M12 fixture: PASS at 25 sounding endpoints and 21 source families, with the visible tally matching runtime truth.
+- Focused M13 browser fixture: PASS for Sine/Triangle/Saw, independent Duplicate retuning, Saw Multi-Plot source singularity, conservative 2% levels, clear-to-zero, and immediate Saw rebuild.
+- Git whitespace integrity: PASS.
+
+8. MANUAL MUSICAL ACCEPTANCE
+
+Begin at conservative physical monitoring level:
+
+1. Create one Sine, one Triangle, and one Saw at clearly different pitches and low programmed levels.
+2. Start each separately and confirm distinct timbre plus correct pitch changes.
+3. Change generator type while stopped first; then exercise normal live controls and listen for clicks, static, or unexpected level jumps.
+4. Duplicate one source, retune the Duplicate, and confirm the original remains unchanged.
+5. Plot one source, add several Multi-Plots, and confirm one source identity with shared pitch/generator and independent pan/trim/mute.
+6. Record several live Multi-Plot additions and validate the one-second silent staging interval, coordinated 250 ms zero-slope crossfade, and coherent `1 / N` family normalization on the actual recording path.
+7. Confirm the Sound Desk tally tracks sounding endpoints, total endpoints, and distinct source families under load.
+8. Build a folder of three or more plots, select a middle/back member, double-click the grid folder marker, and confirm the exposed endpoint can be dragged away while the remainder stays plotted and live.
+9. Stop and clear everything, confirm silence, then immediately build and start a fresh source.
+
+9. KNOWN LIMITATIONS / STOP BOUNDARY
+
+- Automated tests cannot prove perceived timbral quality, device-specific click removal, acoustic safety, or recording cleanliness; user listening remains required.
+- Pitch remains frequency-oriented. MIDI, note parsing, scales, microtonal systems, sequencing, arpeggiation, and Chord insertion were not added.
+- Generator switching updates the native oscillator waveform in place; final subjective behavior during live switching remains part of manual acceptance.
+- Runtime pitch/level are not newly added to durable project persistence; M13 preserves the existing state boundary.
+- No Square/Pulse, Noise, Blend, filters, new Envelope behavior, LFO, modulation, recording, Auto Plot, Orchestra, Grid Detuner, or other M14+ functionality was begun.
+- Final user testing passed: the workflow was responsive and user-friendly, with no bad noise or misbehaving functions found. M12–M13 is approved for hard-save publication. Do not begin M14 without a new explicit brief.

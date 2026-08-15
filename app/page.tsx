@@ -33,6 +33,7 @@ import {
   getElapsedMs,
   getModuleDisplay,
   getSelectedModuleIds,
+  isPitchedGeneratorModule,
   MODULE_LIBRARY,
   sanitizeRestoredState,
   type AppState,
@@ -41,6 +42,7 @@ import {
   type ModuleTemplateType,
   type ThreadConnection,
 } from "./interaction-state";
+import { PITCHED_GENERATOR_TYPES, generatorLabel, type PitchedGeneratorType } from "./musical-source";
 import {
   BASELINE_UI_CONFIG,
   DARK_UI_CONFIG,
@@ -69,9 +71,10 @@ import {
   coordinateKey,
   coordinateLabel,
   createInitialSpatialRoutingState,
-  getChannelsAtCoordinate,
   getCoordinateByKey,
   spatialRoutingReducer,
+  type SpatialChannel,
+  type SpatialPosition,
   type SpatialRoutingState,
 } from "./spatial-routing";
 import {
@@ -327,28 +330,97 @@ function SliderField({ label, value, disabled, onChange }: { label: string; valu
   return <label className="slider-field"><span><span>{label}</span><output>{value}%</output></span><input disabled={disabled} aria-label={label} type="range" min="0" max="100" value={value} onInput={(event) => onChange(Number(event.currentTarget.value))} onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); updateFromPointer(event); }} onPointerMove={(event) => { if (event.buttons === 1) updateFromPointer(event); }} /></label>;
 }
 
-function SpatialGrid({ state, variant, selectedCoordinateKey, onSelectCoordinate }: {
+function plotLabel(plot: SpatialChannel) {
+  const suffix = plot.plotNumber <= 26 ? String.fromCharCode(64 + plot.plotNumber) : String(plot.plotNumber);
+  return `${plot.label} · PLOT ${suffix}`;
+}
+
+function SpatialGrid({ state, variant, selectedCoordinateKey, selectedPlotId, quickDetachedPlotId, onSelectCoordinate, onSelectPlot, onOpenStack, onQuickDetachPlot, onPreviewPlotMove, onCommitPlotMove, onPreviewPlotStackMove, onCommitPlotStackMove }: {
   state: SpatialRoutingState;
   variant: "sound-desk" | "inspection";
   selectedCoordinateKey?: string | null;
+  selectedPlotId?: ChannelId | null;
+  quickDetachedPlotId?: ChannelId | null;
   onSelectCoordinate?: (coordinateKey: string) => void;
+  onSelectPlot?: (plot: SpatialChannel) => void;
+  onOpenStack?: (position: SpatialPosition) => void;
+  onQuickDetachPlot?: (plot: SpatialChannel) => void;
+  onPreviewPlotMove?: (plotId: ChannelId, position: SpatialPosition) => void;
+  onCommitPlotMove?: (plotId: ChannelId, position: SpatialPosition) => void;
+  onPreviewPlotStackMove?: (plotIds: readonly ChannelId[], position: SpatialPosition) => void;
+  onCommitPlotStackMove?: (plotIds: readonly ChannelId[], position: SpatialPosition) => void;
 }) {
-  return <div className={`spatial-grid spatial-grid-${variant}`} role="grid" aria-label={variant === "sound-desk" ? "Sound Desk shared 5 by 5 spatial grid" : "Visualiser routing inspection 5 by 5 spatial grid"}>
+  const gridRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<{ pointerId: number; plotIds: readonly ChannelId[]; origin: SpatialPosition; lastPosition: SpatialPosition; moved: boolean } | null>(null);
+  const dragFrameRef = useRef<number | null>(null);
+  const suppressFolderClickRef = useRef(false);
+  const [dragPreview, setDragPreview] = useState<{ plotIds: readonly ChannelId[]; position: SpatialPosition } | null>(null);
+  const pointerPosition = (event: PointerEvent<HTMLElement>): SpatialPosition | null => {
+    const points = gridRef.current?.querySelectorAll<HTMLElement>(".spatial-point[data-coordinate]");
+    if (!points?.length) return null;
+    let nearest: { key: string; distance: number } | null = null;
+    for (const point of points) {
+      const bounds = point.getBoundingClientRect();
+      const distance = Math.hypot(event.clientX - (bounds.left + bounds.width / 2), event.clientY - (bounds.top + bounds.height / 2));
+      const key = point.dataset.coordinate;
+      if (key && (!nearest || distance < nearest.distance)) nearest = { key, distance };
+    }
+    return nearest ? getCoordinateByKey(nearest.key) : null;
+  };
+  const presentDrag = () => {
+    dragFrameRef.current = null;
+    const drag = dragRef.current;
+    if (!drag) return;
+    setDragPreview({ plotIds: drag.plotIds, position: drag.lastPosition });
+    if (drag.plotIds.length > 1) onPreviewPlotStackMove?.(drag.plotIds, drag.lastPosition);
+    else onPreviewPlotMove?.(drag.plotIds[0], drag.lastPosition);
+  };
+  const updateDrag = (event: PointerEvent<HTMLElement>) => {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const position = pointerPosition(event);
+    if (!position) return;
+    drag.lastPosition = position;
+    drag.moved = coordinateKey(position) !== coordinateKey(drag.origin);
+    if (dragFrameRef.current === null) dragFrameRef.current = window.requestAnimationFrame(presentDrag);
+  };
+  const finishDrag = (event?: PointerEvent<HTMLElement>) => {
+    const drag = dragRef.current;
+    if (!drag || (event && drag.pointerId !== event.pointerId)) return;
+    if (event) {
+      const position = pointerPosition(event);
+      if (position) drag.lastPosition = position;
+    }
+    if (dragFrameRef.current !== null) window.cancelAnimationFrame(dragFrameRef.current);
+    dragFrameRef.current = null;
+    dragRef.current = null;
+    setDragPreview(null);
+    if (drag.plotIds.length > 1) {
+      suppressFolderClickRef.current = drag.moved;
+      onPreviewPlotStackMove?.(drag.plotIds, drag.lastPosition);
+      onCommitPlotStackMove?.(drag.plotIds, drag.lastPosition);
+    } else {
+      onPreviewPlotMove?.(drag.plotIds[0], drag.lastPosition);
+      onCommitPlotMove?.(drag.plotIds[0], drag.lastPosition);
+    }
+  };
+  useEffect(() => () => {
+    if (dragFrameRef.current !== null) window.cancelAnimationFrame(dragFrameRef.current);
+  }, []);
+  const assignedPlots = state.channels.filter((plot) => plot.assignment);
+  const plotStacks = new Map<string, SpatialChannel[]>();
+  assignedPlots.forEach((plot) => {
+    const key = `${plot.assignment!.x.toFixed(4)},${plot.assignment!.y.toFixed(4)}`;
+    plotStacks.set(key, [...(plotStacks.get(key) ?? []), plot]);
+  });
+  plotStacks.forEach((stack) => stack.sort((a, b) => a.layerOrder - b.layerOrder));
+  return <div ref={gridRef} className={`spatial-grid spatial-grid-${variant}`} role="grid" aria-label={variant === "sound-desk" ? "Sound Desk shared 5 by 5 spatial grid" : "Visualiser routing inspection 5 by 5 spatial grid"}>
     {SPATIAL_COORDINATES.map((coordinate) => {
-      const channels = getChannelsAtCoordinate(state, coordinate);
       const key = coordinateKey(coordinate);
-      const className = `spatial-point ${coordinate.x === 0 && coordinate.y === 0 ? "spatial-origin" : ""} ${channels.length ? "spatial-occupied" : ""} ${selectedCoordinateKey === key ? "spatial-point-selected" : ""}`;
-      const content = <>
-        <span className="spatial-coordinate-label">{key}</span>
-        <span className="spatial-node-stack">
-          {channels.map((channel) => {
-            const accent = MUTED_ACCENTS.find((item) => item.id === channel.accentId);
-            const channelInk = channel.accentId === "utility-blue" ? "#ffffff" : "#111827";
-            return <span key={channel.id} className="spatial-channel-node" data-channel-id={channel.id} style={{ "--channel-color": accent?.value, "--channel-ink": channelInk } as CSSProperties} title={`${channel.label} · ${coordinateLabel(coordinate)}`}>{channel.shortLabel.padStart(2, "0")}</span>;
-          })}
-        </span>
-      </>;
-      const ariaLabel = `Coordinate ${coordinateLabel(coordinate)}${channels.length ? ` · ${channels.map((channel) => channel.label).join(", ")}` : " · empty"}`;
+      const dragTarget = dragPreview && coordinateKey(dragPreview.position) === key;
+      const className = `spatial-point ${coordinate.x === 0 && coordinate.y === 0 ? "spatial-origin" : ""} ${selectedCoordinateKey === key ? "spatial-point-selected" : ""} ${dragTarget ? "spatial-point-drag-target" : ""}`;
+      const content = <span className="spatial-coordinate-label">{key}</span>;
+      const ariaLabel = `Coordinate ${coordinateLabel(coordinate)}`;
       return onSelectCoordinate ? <button
         key={key}
         className={className}
@@ -359,6 +431,121 @@ function SpatialGrid({ state, variant, selectedCoordinateKey, onSelectCoordinate
         onClick={() => onSelectCoordinate(key)}
       >{content}</button> : <div key={key} className={className} role="gridcell" aria-label={ariaLabel} data-coordinate={key}>{content}</div>;
     })}
+    <div className="spatial-plot-layer" role="presentation">
+      {assignedPlots.map((plot) => {
+        const position = dragPreview?.plotIds.includes(plot.id) ? dragPreview.position : plot.assignment!;
+        const stackKey = `${plot.assignment!.x.toFixed(4)},${plot.assignment!.y.toFixed(4)}`;
+        const fullStack = plotStacks.get(stackKey) ?? [plot];
+        const quickDetachedInStack = fullStack.some((item) => item.id === quickDetachedPlotId);
+        const stack = plot.id === quickDetachedPlotId ? [plot] : quickDetachedInStack ? fullStack.filter((item) => item.id !== quickDetachedPlotId) : fullStack;
+        const stackIndex = stack.findIndex((item) => item.id === plot.id);
+        const stackColumns = Math.ceil(Math.sqrt(stack.length));
+        const stackRows = Math.ceil(stack.length / stackColumns);
+        const stackColumn = stackIndex % stackColumns;
+        const stackRow = Math.floor(stackIndex / stackColumns);
+        const stackOffsetX = stack.length > 1 ? (stackColumn - (stackColumns - 1) / 2) * 8 : 0;
+        const stackOffsetY = stack.length > 1 ? (stackRow - (stackRows - 1) / 2) * 8 : 0;
+        const accent = MUTED_ACCENTS.find((item) => item.id === plot.accentId);
+        const channelInk = plot.accentId === "utility-blue" ? "#ffffff" : "#111827";
+        const style = {
+          "--channel-color": accent?.value,
+          "--channel-ink": channelInk,
+          "--plot-stack-x": `${stackOffsetX}px`,
+          "--plot-stack-y": `${stackOffsetY}px`,
+          left: `${10 + (position.x + 2) / 4 * 80}%`,
+          top: `${10 + (2 - position.y) / 4 * 80}%`,
+          zIndex: quickDetachedPlotId === plot.id ? 110 : selectedPlotId === plot.id ? 100 : 10 + stackIndex,
+        } as CSSProperties;
+        const stackLabel = stack.length > 1 ? ` · stack ${stackIndex + 1} of ${stack.length}` : "";
+        const label = `${plotLabel(plot)} · ${coordinateLabel(position)}${stackLabel}${plot.liveTrim === LIVE_TRIM_MIN ? " · muted" : ""}`;
+        const stackClass = stack.length > 1 ? `stacked ${stackIndex === stack.length - 1 ? "stack-top" : ""}` : "";
+        if (variant === "inspection") return <span key={plot.id} className={`spatial-plot-node ${plot.isMultiPlot ? "multi-plot" : ""} ${stackClass}`} data-plot-id={plot.id} data-stack-index={stackIndex + 1} data-stack-size={stack.length} style={style} title={label}>{plot.shortLabel.padStart(2, "0")}<small>{plot.plotNumber}</small></span>;
+        if (stack.length >= 3) return stackIndex === stack.length - 1 ? <button
+          key={plot.id}
+          className={`spatial-plot-node plot-folder-trigger ${plot.isMultiPlot ? "multi-plot" : ""} stacked stack-top`}
+          data-plot-id={plot.id}
+          data-stack-index={stackIndex + 1}
+          data-stack-size={stack.length}
+          style={style}
+          aria-label={`Open plot point folder for ${coordinateLabel(plot.assignment!)} with ${stack.length} endpoints. Drag to move cluster. Double-click to pull the selected or front endpoint free.`}
+          onClick={(event) => {
+            event.stopPropagation();
+            if (suppressFolderClickRef.current) { suppressFolderClickRef.current = false; return; }
+            onOpenStack?.(plot.assignment!);
+          }}
+          onDoubleClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            const detached = fullStack.find((item) => item.id === selectedPlotId) ?? fullStack.at(-1);
+            if (!detached) return;
+            onSelectPlot?.(detached);
+            onQuickDetachPlot?.(detached);
+          }}
+          onPointerDown={(event) => {
+            if (event.button !== 0) return;
+            event.preventDefault();
+            event.stopPropagation();
+            event.currentTarget.setPointerCapture(event.pointerId);
+            dragRef.current = { pointerId: event.pointerId, plotIds: stack.map((item) => item.id), origin: plot.assignment!, lastPosition: plot.assignment!, moved: false };
+          }}
+          onPointerMove={updateDrag}
+          onPointerLeave={updateDrag}
+          onPointerUp={(event) => { finishDrag(event); if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); }}
+          onPointerCancel={finishDrag}
+          onLostPointerCapture={() => finishDrag()}
+          onKeyDown={(event) => {
+            const step = event.shiftKey ? 1 : 0.25;
+            const delta = event.key === "ArrowLeft" ? { x: -step, y: 0 } : event.key === "ArrowRight" ? { x: step, y: 0 } : event.key === "ArrowUp" ? { x: 0, y: step } : event.key === "ArrowDown" ? { x: 0, y: -step } : null;
+            if (!delta) return;
+            event.preventDefault();
+            const next = { x: Math.max(-2, Math.min(2, plot.assignment!.x + delta.x)), y: Math.max(-2, Math.min(2, plot.assignment!.y + delta.y)) };
+            onPreviewPlotStackMove?.(stack.map((item) => item.id), next);
+            onCommitPlotStackMove?.(stack.map((item) => item.id), next);
+          }}
+        >{plot.shortLabel.padStart(2, "0")}<small>{plot.plotNumber}</small></button> : <span
+          key={plot.id}
+          className={`spatial-plot-node plot-folder-member ${plot.isMultiPlot ? "multi-plot" : ""} stacked`}
+          data-plot-id={plot.id}
+          data-stack-index={stackIndex + 1}
+          data-stack-size={stack.length}
+          style={style}
+          aria-hidden="true"
+        >{plot.shortLabel.padStart(2, "0")}<small>{plot.plotNumber}</small></span>;
+        return <button
+          key={plot.id}
+          className={`spatial-plot-node ${plot.isMultiPlot ? "multi-plot" : ""} ${selectedPlotId === plot.id ? "selected" : ""} ${plot.liveTrim === LIVE_TRIM_MIN ? "muted" : ""} ${quickDetachedPlotId === plot.id ? "quick-detached" : ""} ${stackClass}`}
+          data-plot-id={plot.id}
+          data-stack-index={stackIndex + 1}
+          data-stack-size={stack.length}
+          style={style}
+          aria-label={`${label}${quickDetachedPlotId === plot.id ? " · pulled free from folder" : ""}. Drag to move live.`}
+          aria-pressed={selectedPlotId === plot.id}
+          onClick={(event) => { event.stopPropagation(); onSelectPlot?.(plot); }}
+          onPointerDown={(event) => {
+            if (event.button !== 0) return;
+            event.preventDefault();
+            event.stopPropagation();
+            onSelectPlot?.(plot);
+            event.currentTarget.setPointerCapture(event.pointerId);
+            dragRef.current = { pointerId: event.pointerId, plotIds: [plot.id], origin: plot.assignment!, lastPosition: plot.assignment!, moved: false };
+          }}
+          onPointerMove={updateDrag}
+          onPointerLeave={updateDrag}
+          onPointerUp={(event) => { finishDrag(event); if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); }}
+          onPointerCancel={finishDrag}
+          onLostPointerCapture={() => finishDrag()}
+          onKeyDown={(event) => {
+            const step = event.shiftKey ? 1 : 0.25;
+            const delta = event.key === "ArrowLeft" ? { x: -step, y: 0 } : event.key === "ArrowRight" ? { x: step, y: 0 } : event.key === "ArrowUp" ? { x: 0, y: step } : event.key === "ArrowDown" ? { x: 0, y: -step } : null;
+            if (!delta) return;
+            event.preventDefault();
+            const next = { x: Math.max(-2, Math.min(2, plot.assignment!.x + delta.x)), y: Math.max(-2, Math.min(2, plot.assignment!.y + delta.y)) };
+            onPreviewPlotMove?.(plot.id, next);
+            onCommitPlotMove?.(plot.id, next);
+          }}
+        >{plot.shortLabel.padStart(2, "0")}<small>{plot.plotNumber}</small></button>;
+      })}
+    </div>
   </div>;
 }
 
@@ -387,40 +574,64 @@ function ChannelRail({ channels, selectedChannelId, onSelect }: { channels: Inco
   </section>;
 }
 
-function ChannelPlotter({ incoming, state, selectedChannelId, selectedCoordinateKey, dispatch }: {
+function ChannelPlotter({ incoming, state, selectedChannelId, selectedPlotId, selectedCoordinateKey, openStackKey, onCloseStack, onSelectPlot, onQuickDetachPlot, onRemoveMultiPlot, dispatch }: {
   incoming: IncomingChannel[];
   state: SpatialRoutingState;
   selectedChannelId: ChannelId | null;
+  selectedPlotId: ChannelId | null;
   selectedCoordinateKey: string | null;
+  openStackKey: string | null;
+  onCloseStack: () => void;
+  onSelectPlot: (plot: SpatialChannel) => void;
+  onQuickDetachPlot: (plot: SpatialChannel) => void;
+  onRemoveMultiPlot: (plotId: ChannelId) => void;
   dispatch: React.Dispatch<Parameters<typeof spatialRoutingReducer>[1]>;
 }) {
+  const [modeDrawerOpen, setModeDrawerOpen] = useState(false);
   const incomingChannel = incoming.find((channel) => channel.id === selectedChannelId && channel.status === "complete") ?? null;
-  const spatialChannel = state.channels.find((channel) => channel.id === selectedChannelId) ?? null;
+  const spatialChannel = state.channels.find((channel) => channel.id === selectedPlotId) ?? state.channels.find((channel) => !channel.isMultiPlot && channel.channelId === selectedChannelId) ?? null;
   const selectedCoordinate = selectedCoordinateKey ? getCoordinateByKey(selectedCoordinateKey) : null;
   const canPlot = Boolean(incomingChannel && spatialChannel && selectedCoordinate);
+  const folderPlots = openStackKey ? state.channels
+    .filter((plot) => plot.assignment && coordinateKey(plot.assignment) === openStackKey)
+    .sort((a, b) => b.layerOrder - a.layerOrder) : [];
   return <aside className="channel-plotter" aria-labelledby="channel-plotter-title">
-    <div className="channel-plotter-heading"><span className="fixture-kicker">ROUTING INSTRUMENT</span><h2 id="channel-plotter-title">Channel Plotter</h2><p>Select channel → select grid point → plot.</p></div>
+    <div className="channel-plotter-heading"><div><span className="fixture-kicker">MANUAL ROUTING INSTRUMENT</span><h2 id="channel-plotter-title">Channel Plotter</h2><p>Select channel → select grid point → plot. Drag plotted endpoints live.</p></div><button className="plotter-mode-toggle" aria-expanded={modeDrawerOpen} aria-controls="plotter-mode-drawer" onClick={() => setModeDrawerOpen((open) => !open)}>{modeDrawerOpen ? "CLOSE MODES" : "PLOT MODES"}</button></div>
     <div className="plotter-proposal" aria-live="polite">
       <span>PROPOSED ROUTE</span>
       <strong>{incomingChannel?.label ?? "NO CHANNEL"}<i>→</i>{selectedCoordinate ? coordinateLabel(selectedCoordinate) : "NO POINT"}</strong>
-      <small>Current&nbsp; {spatialChannel?.assignment ? coordinateLabel(spatialChannel.assignment) : "UNPLOTTED"}</small>
+      <small>Current&nbsp; {spatialChannel ? `${plotLabel(spatialChannel)} · ${spatialChannel.assignment ? coordinateLabel(spatialChannel.assignment) : "UNPLOTTED"}` : "UNPLOTTED"}</small>
     </div>
     <div className="plotter-actions">
-      <button className="plot-action" disabled={!canPlot} onClick={() => { if (incomingChannel && selectedCoordinate) dispatch({ type: "assign-channel", channelId: incomingChannel.id, coordinate: selectedCoordinate }); }}>Plot route</button>
-      <button disabled={!incomingChannel || !spatialChannel?.assignment} onClick={() => { if (incomingChannel) dispatch({ type: "unassign-channel", channelId: incomingChannel.id }); }}>Unplot</button>
+      <button className="plot-action" disabled={!canPlot} onClick={() => { if (spatialChannel && selectedCoordinate) dispatch({ type: "assign-channel", channelId: spatialChannel.id, coordinate: selectedCoordinate }); }}>Plot route</button>
+      <button className="multi-plot-action" disabled={!incomingChannel || !state.channels.some((plot) => !plot.isMultiPlot && plot.channelId === incomingChannel.id && plot.assignment)} onClick={() => { if (incomingChannel) dispatch({ type: "add-multi-plot", channelId: incomingChannel.id }); }}>＋ MULTI-PLOT</button>
+      <button disabled={!spatialChannel?.assignment} onClick={() => { if (spatialChannel) dispatch({ type: "unassign-channel", channelId: spatialChannel.id }); }}>Unplot</button>
     </div>
+    <div className="plot-point-folder-slot">{folderPlots.length >= 3 && <section className="plot-point-folder" aria-label={`Plot point folder ${openStackKey}`}>
+      <header><div><span>PLOT POINT FOLDER</span><strong>{coordinateLabel(folderPlots[0].assignment!)} · {folderPlots.length} ENDPOINTS</strong></div><button aria-label="Close plot point folder" onClick={onCloseStack}>×</button></header>
+      <p>Double-click any member to pull it free for immediate dragging. You can also select a member and double-click the grid folder marker; without a selection, the marker pulls the front endpoint. REMOVE deletes only that endpoint.</p>
+      <div className="plot-folder-list">
+        {folderPlots.map((plot, index) => <div className={selectedPlotId === plot.id ? "selected" : ""} key={plot.id} data-folder-plot-id={plot.id}>
+          <button className="plot-folder-select" aria-pressed={selectedPlotId === plot.id} onClick={() => onSelectPlot(plot)} onDoubleClick={() => onQuickDetachPlot(plot)}><span>{plotLabel(plot)}</span><small>{index === 0 ? "FRONT" : index === folderPlots.length - 1 ? "BACK" : `LAYER ${index + 1}`}</small></button>
+          <button aria-label={`Bring ${plotLabel(plot)} forward`} disabled={index === 0} onClick={() => dispatch({ type: "move-plot-layer", plotId: plot.id, direction: "forward" })}>↑</button>
+          <button aria-label={`Send ${plotLabel(plot)} backward`} disabled={index === folderPlots.length - 1} onClick={() => dispatch({ type: "move-plot-layer", plotId: plot.id, direction: "back" })}>↓</button>
+        </div>)}
+      </div>
+    </section>}</div>
     <div className="plotted-channel-overview" aria-label="Plotted channel overview">
-      <div className="plotter-overview-heading"><span>ROUTED CHANNELS</span><small>{state.channels.filter((channel) => channel.assignment).length} plotted</small></div>
-      {incoming.map((channel) => {
-        const route = state.channels.find((item) => item.id === channel.id);
-        const accent = MUTED_ACCENTS.find((item) => item.id === channel.accentId);
-        const trimLabel = route?.liveTrim === -100 ? "MUTE" : route?.liveTrim === 0 ? "0" : `${route && route.liveTrim > 0 ? "+" : ""}${route?.liveTrim ?? 0}%`;
-        return <div className={`plotter-channel-row ${channel.status}`} data-channel-id={channel.id} key={channel.id} style={{ "--channel-color": accent?.value } as CSSProperties}>
-          <i aria-hidden="true" /><b>{channel.label}</b><span>{channel.status === "complete" ? route?.assignment ? coordinateLabel(route.assignment) : "UNPLOTTED" : "INCOMPLETE"}</span><small>{channel.status === "complete" ? "ROUTABLE" : "AWAITING OUTPUT"}</small>
-          {channel.status === "complete" && route?.assignment && <label className={`live-trim-control ${route.liveTrim === 0 ? "at-zero" : ""}`}><span>LIVE TRIM</span><input aria-label={`${channel.label} Live Trim`} type="range" min={LIVE_TRIM_MIN} max={LIVE_TRIM_MAX} step="1" value={route.liveTrim} onChange={(event) => dispatch({ type: "set-live-trim", channelId: channel.id, value: Number(event.target.value) })} /><output>{trimLabel}</output><button aria-label={`Reset ${channel.label} Live Trim to 0`} disabled={route.liveTrim === 0} onClick={() => dispatch({ type: "set-live-trim", channelId: channel.id, value: 0 })}>0</button></label>}
+      <div className="plotter-overview-heading"><span>SPATIAL PLOTS</span><small>{state.channels.filter((channel) => channel.assignment).length} active</small></div>
+      {state.channels.map((route) => {
+        const channel = incoming.find((item) => item.id === route.channelId);
+        if (!channel) return null;
+        const accent = MUTED_ACCENTS.find((item) => item.id === route.accentId);
+        const trimLabel = route.liveTrim === -100 ? "MUTE" : route.liveTrim === 0 ? "0" : `${route.liveTrim > 0 ? "+" : ""}${route.liveTrim}%`;
+        return <div className={`plotter-channel-row ${channel.status} ${selectedPlotId === route.id ? "selected" : ""}`} data-channel-id={route.channelId} data-plot-id={route.id} key={route.id} style={{ "--channel-color": accent?.value } as CSSProperties}>
+          <i aria-hidden="true" /><button className="plot-row-select" aria-pressed={selectedPlotId === route.id} onClick={() => onSelectPlot(route)}>{plotLabel(route)}</button><span>{channel.status === "complete" ? route.assignment ? coordinateLabel(route.assignment) : "UNPLOTTED" : "INCOMPLETE"}</span><small>{route.isMultiPlot ? "SHARED SOURCE" : channel.status === "complete" ? "CHANNEL OUT" : "AWAITING OUTPUT"}</small>
+          {channel.status === "complete" && route.assignment && <div className="plot-endpoint-controls"><label className={`live-trim-control ${route.liveTrim === 0 ? "at-zero" : ""}`}><span>LIVE TRIM</span><input aria-label={`${plotLabel(route)} Live Trim`} type="range" min={LIVE_TRIM_MIN} max={LIVE_TRIM_MAX} step="1" value={route.liveTrim} onChange={(event) => dispatch({ type: "set-live-trim", channelId: route.id, value: Number(event.target.value) })} /><output>{trimLabel}</output><button type="button" aria-label={`Reset ${plotLabel(route)} Live Trim to 0`} disabled={route.liveTrim === 0} onClick={() => dispatch({ type: "set-live-trim", channelId: route.id, value: 0 })}>0</button></label><button className="plot-mute-action" aria-pressed={route.liveTrim === LIVE_TRIM_MIN} onClick={() => dispatch({ type: "set-live-trim", channelId: route.id, value: route.liveTrim === LIVE_TRIM_MIN ? 0 : LIVE_TRIM_MIN })}>{route.liveTrim === LIVE_TRIM_MIN ? "UNMUTE" : "MUTE"}</button>{route.isMultiPlot && <button className="plot-remove-action" aria-label={`Remove ${plotLabel(route)}`} onClick={() => onRemoveMultiPlot(route.id)}>REMOVE</button>}</div>}
         </div>;
       })}
     </div>
+    {modeDrawerOpen && <div className="plotter-mode-drawer" id="plotter-mode-drawer" role="region" aria-label="Plotter modes"><div className="plotter-mode-drawer-heading"><span>PLOTTER MODES</span><button aria-label="Close Plotter modes" onClick={() => setModeDrawerOpen(false)}>×</button></div><button className="current" aria-current="page" onClick={() => setModeDrawerOpen(false)}><strong>MANUAL PLOTTER</strong><small>ACTIVE WORKSPACE</small></button><button disabled><strong>AUTO PLOT</strong><small>FUTURE · UNAVAILABLE</small></button><button disabled><strong>ORCHESTRA</strong><small>FUTURE · UNAVAILABLE</small></button></div>}
   </aside>;
 }
 
@@ -432,23 +643,48 @@ function SoundDeskWorkspace({ threadsState, state, dispatch, sessionDispatch }: 
 }) {
   useAudioRuntimeRevision();
   const incoming = getIncomingChannels(threadsState);
+  const soundingEndpointIds = new Set(applicationAudioRuntime.getSoundingChannelIds());
+  const activeEndpointCount = state.channels.filter((channel) => soundingEndpointIds.has(channel.id)).length;
+  const sourceCount = new Set(state.channels.map((channel) => channel.sourceId)).size;
   const [selectedChannelId, setSelectedChannelId] = useState<ChannelId | null>("channel-01");
+  const [selectedPlotId, setSelectedPlotId] = useState<ChannelId | null>("channel-01");
   const [selectedCoordinateKey, setSelectedCoordinateKey] = useState<string | null>("0,0");
+  const [openStackKey, setOpenStackKey] = useState<string | null>(null);
+  const [quickDetachedPlotId, setQuickDetachedPlotId] = useState<ChannelId | null>(null);
   const effectiveSelectedChannelId = incoming.some((channel) => channel.id === selectedChannelId) ? selectedChannelId : incoming.find((channel) => channel.status === "complete")?.id ?? null;
+  const effectiveSelectedPlotId = state.channels.some((plot) => plot.id === selectedPlotId && plot.channelId === effectiveSelectedChannelId) ? selectedPlotId : state.channels.find((plot) => !plot.isMultiPlot && plot.channelId === effectiveSelectedChannelId)?.id ?? null;
   const selectChannel = (channel: IncomingChannel) => {
     if (channel.status !== "complete") return;
     setSelectedChannelId(channel.id);
-    const current = state.channels.find((item) => item.id === channel.id)?.assignment;
+    setSelectedPlotId(channel.id);
+    setOpenStackKey(null);
+    const current = state.channels.find((item) => !item.isMultiPlot && item.channelId === channel.id)?.assignment;
     if (current) setSelectedCoordinateKey(coordinateKey(current));
   };
+  const selectPlot = (plot: SpatialChannel) => {
+    setSelectedChannelId(plot.channelId);
+    setSelectedPlotId(plot.id);
+  };
+  const openStack = (position: SpatialPosition) => {
+    const key = coordinateKey(position);
+    const stack = state.channels.filter((plot) => plot.assignment && coordinateKey(plot.assignment) === key).sort((a, b) => b.layerOrder - a.layerOrder);
+    const topPlot = stack[0];
+    setSelectedCoordinateKey(key);
+    setOpenStackKey(key);
+    if (topPlot && !stack.some((plot) => plot.id === selectedPlotId)) selectPlot(topPlot);
+  };
+  const quickDetachPlot = (plot: SpatialChannel) => {
+    selectPlot(plot);
+    setQuickDetachedPlotId(plot.id);
+    setOpenStackKey(null);
+  };
   return <section className="future-workspace spatial-workspace sound-desk-workspace" aria-labelledby="sound-desk-title" data-workspace-surface="sound-desk">
-    <WorkspaceTitlebar id="sound-desk-title" title="Sound Desk / Channel Routing" trailing={<div className="sound-desk-title-actions"><SessionTransport dispatch={sessionDispatch} /><span className="spatial-model-status">{incoming.filter((channel) => channel.status === "complete").length} routable · 25 points</span></div>} />
+    <WorkspaceTitlebar id="sound-desk-title" title="Sound Desk / Channel Routing" trailing={<div className="sound-desk-title-actions"><SessionTransport dispatch={sessionDispatch} /><span className="spatial-model-status" aria-label="Sound Desk endpoint load tally">SOUNDING {activeEndpointCount} / {state.channels.length} ENDPOINTS · {sourceCount} SOURCES</span></div>} />
     <ChannelRail channels={incoming} selectedChannelId={effectiveSelectedChannelId} onSelect={selectChannel} />
     <div className="sound-desk-routing-instrument">
-      <div className="spatial-grid-panel"><SpatialGrid state={state} variant="sound-desk" selectedCoordinateKey={selectedCoordinateKey} onSelectCoordinate={setSelectedCoordinateKey} /><SpatialOrientation /></div>
-      <ChannelPlotter incoming={incoming} state={state} selectedChannelId={effectiveSelectedChannelId} selectedCoordinateKey={selectedCoordinateKey} dispatch={dispatch} />
+      <div className="spatial-grid-panel"><SpatialGrid state={state} variant="sound-desk" selectedCoordinateKey={selectedCoordinateKey} selectedPlotId={effectiveSelectedPlotId} quickDetachedPlotId={quickDetachedPlotId} onSelectCoordinate={setSelectedCoordinateKey} onSelectPlot={selectPlot} onOpenStack={openStack} onQuickDetachPlot={quickDetachPlot} onPreviewPlotMove={(plotId, position) => applicationAudioRuntime.setSpatialX(plotId, position.x, false)} onCommitPlotMove={(plotId, position) => { dispatch({ type: "move-plot", plotId, position }); if (plotId === quickDetachedPlotId) setQuickDetachedPlotId(null); }} onPreviewPlotStackMove={(plotIds, position) => plotIds.forEach((plotId) => applicationAudioRuntime.setSpatialX(plotId, position.x, false))} onCommitPlotStackMove={(plotIds, position) => { dispatch({ type: "move-plot-stack", plotIds, position }); setSelectedCoordinateKey(coordinateKey(position)); setOpenStackKey(null); }} /><SpatialOrientation /></div>
+      <ChannelPlotter incoming={incoming} state={state} selectedChannelId={effectiveSelectedChannelId} selectedPlotId={effectiveSelectedPlotId} selectedCoordinateKey={selectedCoordinateKey} openStackKey={openStackKey} onCloseStack={() => setOpenStackKey(null)} onSelectPlot={selectPlot} onQuickDetachPlot={quickDetachPlot} onRemoveMultiPlot={(plotId) => { applicationAudioRuntime.disposeChannel(plotId); dispatch({ type: "remove-multi-plot", plotId }); if (plotId === quickDetachedPlotId) setQuickDetachedPlotId(null); }} dispatch={dispatch} />
     </div>
-    <details className="orchestra-placeholder"><summary>ORCHESTRA / ADVANCED <span>Reserved</span></summary></details>
   </section>;
 }
 
@@ -529,8 +765,9 @@ function WorkspaceNavigation({ workspace, navigate }: {
   </>;
 }
 
-function Inspector({ state, selectedModule, selectedModules, selectedConnection, uiConfig, updateParameter, setAccent, setHighlightStyle, setHighlightWeight, dispatch }: {
+function Inspector({ state, spatialRouting, selectedModule, selectedModules, selectedConnection, uiConfig, updateParameter, setAccent, setHighlightStyle, setHighlightWeight, onDeleteSelection, dispatch }: {
   state: AppState;
+  spatialRouting: SpatialRoutingState;
   selectedModule: ModuleInstance | null;
   selectedModules: ModuleInstance[];
   selectedConnection: ThreadConnection | null;
@@ -539,6 +776,7 @@ function Inspector({ state, selectedModule, selectedModules, selectedConnection,
   setAccent: (value: AccentId | null) => void;
   setHighlightStyle: (value: UIConfig["nodes"]["groupingAccentStyle"]) => void;
   setHighlightWeight: (value: 1 | 1.5) => void;
+  onDeleteSelection: () => void;
   dispatch: React.Dispatch<Parameters<typeof appReducer>[1]>;
 }) {
   if (selectedConnection) {
@@ -548,10 +786,10 @@ function Inspector({ state, selectedModule, selectedModules, selectedConnection,
   }
   if (selectedModules.length > 1) return <div className="inspector-content batch-inspector">
     <div className="selection-summary"><span>Batch selected</span><strong>{selectedModules.length} modules</strong><small>{selectedModules.map((module) => module.title).join(" · ")}</small></div>
-    <details className="inspector-section"><summary>Batch actions</summary><p className="inspector-note">Drag any selected module to move the whole group. Shift-click toggles membership.</p><div className="lifecycle-actions"><button onClick={() => dispatch({ type: "duplicate-selection" })}>Duplicate batch</button><button className="danger" onClick={() => dispatch({ type: "delete-selection" })}>Delete batch</button></div></details>
+    <details className="inspector-section"><summary>Batch actions</summary><p className="inspector-note">Drag any selected module to move the whole group. Shift-click toggles membership.</p><div className="lifecycle-actions"><button onClick={() => dispatch({ type: "duplicate-selection" })}>Duplicate batch</button><button className="danger" onClick={onDeleteSelection}>Delete batch</button></div></details>
   </div>;
   if (!selectedModule) return <div className="inspector-content empty-inspector">Select a module or Thread.</div>;
-  if (selectedModule.type === "sine-source" && selectedModule.audioChannelId) return <SineSourceInspector state={state} module={selectedModule} dispatch={dispatch} />;
+  if (isPitchedGeneratorModule(selectedModule) && selectedModule.audioChannelId) return <PitchedGeneratorInspector state={state} spatialRouting={spatialRouting} module={selectedModule} dispatch={dispatch} />;
   const disabled = !selectedModule.enabled;
   const p = selectedModule.parameters;
   return <div className="inspector-content">
@@ -579,12 +817,13 @@ function Inspector({ state, selectedModule, selectedModules, selectedConnection,
       <label className="form-row"><span>Output</span><select disabled={disabled} className="select-control" value={p.output} onChange={(event) => updateParameter("output", event.target.value)}><option>Sample Slots 01–16</option><option>Field A</option><option>Diagnostics Bus</option></select></label>
       <div className="segmented wide">{(["active", "muted", "bypassed"] as const).map((status) => <button disabled={disabled} key={status} className={p.status === status ? "active" : ""} onClick={() => updateParameter("status", status)}>{status[0].toUpperCase() + status.slice(1)}</button>)}</div>
     </details>
-    <div className="lifecycle-actions"><button disabled={disabled} onClick={() => dispatch({ type: "reset-module", id: selectedModule.id })}>Reset defaults</button><button onClick={() => dispatch({ type: "duplicate-selection" })}>Duplicate</button><button className="danger" onClick={() => dispatch({ type: "delete-selection" })}>Delete</button></div>
+    <div className="lifecycle-actions"><button disabled={disabled} onClick={() => dispatch({ type: "reset-module", id: selectedModule.id })}>Reset defaults</button><button onClick={() => dispatch({ type: "duplicate-selection" })}>Duplicate</button><button className="danger" onClick={onDeleteSelection}>Delete</button></div>
   </div>;
 }
 
-function InputsAndChannels({ state, collapsed, onToggle, dispatch }: {
+function InputsAndChannels({ state, spatialRouting, collapsed, onToggle, dispatch }: {
   state: AppState;
+  spatialRouting: SpatialRoutingState;
   collapsed: boolean;
   onToggle: () => void;
   dispatch: React.Dispatch<Parameters<typeof appReducer>[1]>;
@@ -595,8 +834,8 @@ function InputsAndChannels({ state, collapsed, onToggle, dispatch }: {
     {!collapsed && <>
       <button className="add-channel-action" onClick={() => dispatch({ type: "add-channel" })}>＋ ADD CHANNEL</button>
       <div className="input-channel-list" aria-label={`${incoming.length} active channel${incoming.length === 1 ? "" : "s"}`}>
-        {incoming.map((channel) => <div className={`input-channel-fixture ${state.selection?.kind === "channel" && state.selection.id === channel.id ? "selected" : ""}`} key={channel.id} data-channel-id={channel.id}>
-          <ChannelAudioControls channel={channel} selected={state.selection?.kind === "channel" && state.selection.id === channel.id} sourceModuleId={state.modules.find((module) => module.type === "sine-source" && module.audioChannelId === channel.id)?.id ?? null} sourcePlaced={state.modules.some((module) => module.type === "sine-source" && module.audioChannelId === channel.id)} cloneCount={state.threadChannels.filter((item) => item.role === "clone" && item.sourceId === channel.id).length} dispatch={dispatch} />
+        {incoming.filter((channel) => channel.role !== "clone").map((channel) => <div className={`input-channel-fixture ${state.selection?.kind === "channel" && state.selection.id === channel.id ? "selected" : ""}`} key={channel.id} data-channel-id={channel.id}>
+          <ChannelAudioControls channel={channel} selected={state.selection?.kind === "channel" && state.selection.id === channel.id} sourceModuleId={state.modules.find((module) => isPitchedGeneratorModule(module) && module.audioChannelId === channel.id)?.id ?? null} sourcePlaced={state.modules.some((module) => isPitchedGeneratorModule(module) && module.audioChannelId === channel.id)} dependentEndpointCount={state.threadChannels.filter((item) => item.role === "clone" && item.sourceId === channel.id).length + spatialRouting.channels.filter((plot) => plot.isMultiPlot && plot.sourceId === channel.id).length} dispatch={dispatch} />
         </div>)}
       </div>
       <div className="future-inputs" aria-label="Future source types reserved"><span>SOURCES</span><p>Import File · Mic / Live · Capture / Loop · Saved Sources</p><small>Reserved for a future milestone</small></div>
@@ -604,25 +843,21 @@ function InputsAndChannels({ state, collapsed, onToggle, dispatch }: {
   </aside>;
 }
 
-function ChannelAudioControls({ channel, selected, sourceModuleId, sourcePlaced, cloneCount, dispatch }: {
+function ChannelAudioControls({ channel, selected, sourceModuleId, sourcePlaced, dependentEndpointCount, dispatch }: {
   channel: IncomingChannel;
   selected: boolean;
   sourceModuleId: string | null;
   sourcePlaced: boolean;
-  cloneCount: number;
+  dependentEndpointCount: number;
   dispatch: React.Dispatch<Parameters<typeof appReducer>[1]>;
 }) {
   const audio = useAudioChannel(channel.id)!;
+  const generatorName = generatorLabel(audio.generatorType);
   const [removeConfirmationOpen, setRemoveConfirmationOpen] = useState(false);
   const removeChannel = () => {
-    if (channel.role === "clone") {
-      applicationAudioRuntime.disposeChannel(channel.id);
-      dispatch({ type: "delete-endpoint", channelId: channel.id });
-      return;
-    }
-    if (cloneCount) {
+    if (dependentEndpointCount) {
       if (sourceModuleId) dispatch({ type: "select-module", id: sourceModuleId });
-      dispatch({ type: "set-status", value: `${channel.label} has linked Clone paths — confirm deletion in Inspector` });
+      dispatch({ type: "set-status", value: `${channel.label} has linked Multi-Plots — confirm source deletion in Inspector` });
       return;
     }
     setRemoveConfirmationOpen(true);
@@ -633,7 +868,7 @@ function ChannelAudioControls({ channel, selected, sourceModuleId, sourcePlaced,
   };
   return <>
     <div className="input-channel-row">
-      <button className="channel-select" onClick={() => dispatch({ type: "select-channel", channelId: channel.id })} aria-pressed={selected}><span>{channel.label}</span><small>{audio.active ? "SINE · ACTIVE" : "SINE · SILENT"}</small></button>
+      <button className="channel-select" onClick={() => dispatch({ type: "select-channel", channelId: channel.id })} aria-pressed={selected}><span>{channel.label}</span><small>{generatorName.toUpperCase()} · {audio.active ? "ACTIVE" : "SILENT"}</small></button>
       <button className="channel-remove" aria-label={`Remove ${channel.label}`} onClick={removeChannel}>×</button>
     </div>
     {removeConfirmationOpen && <div className="channel-remove-confirmation" role="alert" aria-live="assertive">
@@ -641,37 +876,47 @@ function ChannelAudioControls({ channel, selected, sourceModuleId, sourcePlaced,
       <p>This removes the channel and its downstream route. Other sounding channels remain uninterrupted.</p>
       <div><button onClick={() => setRemoveConfirmationOpen(false)}>CANCEL</button><button className="danger" onClick={confirmRemoveChannel}>REMOVE {channel.label}</button></div>
     </div>}
-    {!sourcePlaced && <SinePlayerControls channelId={channel.id} label={channel.label} audio={audio} onPlace={() => dispatch({ type: "place-channel-source", channelId: channel.id })} onToggle={() => dispatch({ type: "select-channel", channelId: channel.id })} />}
+    {!sourcePlaced && <PitchedGeneratorControls channelId={channel.id} label={channel.label} audio={audio} onPlace={(generatorType) => dispatch({ type: "place-channel-source", channelId: channel.id, generatorType })} onToggle={() => dispatch({ type: "select-channel", channelId: channel.id })} />}
   </>;
 }
 
-function SinePlayerControls({ channelId, label, audio, onPlace, onToggle }: {
+function PitchedGeneratorControls({ channelId, label, audio, onPlace, onToggle, onGeneratorChange }: {
   channelId: ChannelId;
   label: string;
   audio: AudioChannelSnapshot;
-  onPlace?: () => void;
+  onPlace?: (generatorType: PitchedGeneratorType) => void;
   onToggle?: () => void;
+  onGeneratorChange?: (generatorType: PitchedGeneratorType) => void;
 }) {
+  const generatorName = generatorLabel(audio.generatorType);
+  const generatorAria = generatorName.toLowerCase();
   const signalState = audio.active ? audio.routable ? "ACTIVE" : "ACTIVE · UNROUTED" : audio.availability === "error" ? "ERROR" : "SILENT";
-  return <div className="audio-test-controls" aria-label={`${label} sine signal controls`}>
+  const selectGenerator = (generatorType: PitchedGeneratorType) => {
+    applicationAudioRuntime.setGenerator(channelId, generatorType);
+    onGeneratorChange?.(generatorType);
+  };
+  return <div className="audio-test-controls" aria-label={`${label} pitched generator controls`}>
       <div className="audio-state-line" role="status"><span className={audio.active && audio.routable ? "active" : "silent"} /> <b>{signalState}</b><small>{audio.active && !audio.routable ? "Connect to any free Channel Out" : audio.message}</small></div>
+      <div className="generator-selector" aria-label={`${label} generator type`}>
+        {PITCHED_GENERATOR_TYPES.map((generatorType) => <button key={generatorType} aria-pressed={audio.generatorType === generatorType} onClick={() => selectGenerator(generatorType)}>{generatorLabel(generatorType).toUpperCase()}</button>)}
+      </div>
       <div className="frequency-control">
-        <div className="frequency-heading"><span>FREQUENCY</span><output aria-live="polite">{audio.frequency} Hz</output></div>
-        <input aria-label={`${label} sine frequency`} type="range" min={AUDIO_FREQUENCY_MIN} max={AUDIO_FREQUENCY_MAX} step="1" value={audio.frequency} onChange={(event) => applicationAudioRuntime.setFrequency(channelId, Number(event.target.value))} />
+        <div className="frequency-heading"><span>PITCH</span><output aria-live="polite">{audio.frequency} Hz</output></div>
+        <input aria-label={`${label} ${generatorAria} frequency`} type="range" min={AUDIO_FREQUENCY_MIN} max={AUDIO_FREQUENCY_MAX} step="1" value={audio.frequency} onChange={(event) => applicationAudioRuntime.setPitch(channelId, Number(event.target.value))} />
         <small className="commissioning-range">DEVELOPMENT / COMMISSIONING RANGE · 50 Hz–10 kHz · NOT A SAFETY LIMIT</small>
         <div className="frequency-stepper" aria-label={`${label} precise frequency controls`}>
-          <button aria-label={`Decrease ${label} frequency by 1 Hz`} disabled={audio.frequency <= AUDIO_FREQUENCY_MIN} onClick={() => applicationAudioRuntime.setFrequency(channelId, audio.frequency - 1)}>−</button>
+          <button aria-label={`Decrease ${label} frequency by 1 Hz`} disabled={audio.frequency <= AUDIO_FREQUENCY_MIN} onClick={() => applicationAudioRuntime.setPitch(channelId, audio.frequency - 1)}>−</button>
           <small>1 HZ</small>
-          <button aria-label={`Increase ${label} frequency by 1 Hz`} disabled={audio.frequency >= AUDIO_FREQUENCY_MAX} onClick={() => applicationAudioRuntime.setFrequency(channelId, audio.frequency + 1)}>+</button>
+          <button aria-label={`Increase ${label} frequency by 1 Hz`} disabled={audio.frequency >= AUDIO_FREQUENCY_MAX} onClick={() => applicationAudioRuntime.setPitch(channelId, audio.frequency + 1)}>+</button>
         </div>
       </div>
       <label className="level-control"><span>LEVEL</span><div className="level-dial" style={{ "--level-angle": `${-135 + audio.level * 2.7}deg` } as CSSProperties}><i /></div><output>{audio.level}%</output><input aria-label={`${label} level`} type="range" min="0" max="100" step="1" value={audio.level} onChange={(event) => applicationAudioRuntime.setLevel(channelId, Number(event.target.value))} /></label>
-      {onPlace && <button className="place-source-action" aria-label={`Place ${label} sine source in Threads`} onClick={onPlace}>PLACE SOURCE</button>}
-      <button aria-label={`${label} ${audio.active ? "stop" : "start"} sine signal`} className={`signal-toggle ${audio.active ? "stop" : "start"}`} onClick={() => { onToggle?.(); if (audio.active) applicationAudioRuntime.stopChannel(channelId); else void applicationAudioRuntime.startChannel(channelId); }}>{audio.active ? "STOP SINE" : "START SINE"}</button>
+      {onPlace && <button className="place-source-action" aria-label={`Place ${label} ${generatorAria} generator in Threads`} onClick={() => onPlace(audio.generatorType)}>PLACE GENERATOR</button>}
+      <button aria-label={`${label} ${audio.active ? "stop" : "start"} ${generatorAria} signal`} className={`signal-toggle ${audio.active ? "stop" : "start"}`} onClick={() => { onToggle?.(); if (audio.active) applicationAudioRuntime.stopChannel(channelId); else void applicationAudioRuntime.startChannel(channelId); }}>{audio.active ? `STOP ${generatorName.toUpperCase()}` : `START ${generatorName.toUpperCase()}`}</button>
     </div>;
 }
 
-function SineSourceInspector({ state, module, dispatch }: { state: AppState; module: ModuleInstance; dispatch: React.Dispatch<Parameters<typeof appReducer>[1]> }) {
+function PitchedGeneratorInspector({ state, spatialRouting, module, dispatch }: { state: AppState; spatialRouting: SpatialRoutingState; module: ModuleInstance; dispatch: React.Dispatch<Parameters<typeof appReducer>[1]> }) {
   const channel = state.threadChannels.find((item) => item.id === module.audioChannelId);
   const audio = useAudioChannel(channel?.role === "clone" ? channel.sourceId : module.audioChannelId ?? null);
   const [cascadeConfirmationModuleId, setCascadeConfirmationModuleId] = useState<string | null>(null);
@@ -679,23 +924,26 @@ function SineSourceInspector({ state, module, dispatch }: { state: AppState; mod
   if (!module.audioChannelId || !audio || !channel) return null;
   const channelLabel = channel.label;
   const source = state.threadChannels.find((item) => item.id === channel.sourceId) ?? channel;
-  const clones = state.threadChannels.filter((item) => item.role === "clone" && item.sourceId === channel.id);
+  const sharedEndpoints = state.threadChannels.filter((item) => item.role === "clone" && item.sourceId === channel.id);
+  const multiPlots = spatialRouting.channels.filter((plot) => plot.isMultiPlot && plot.sourceId === channel.id);
+  const dependentEndpointCount = sharedEndpoints.length + multiPlots.length;
+  const generatorName = generatorLabel(audio.generatorType);
   if (channel.role === "clone") return <div className="inspector-content sine-source-inspector clone-source-inspector">
-    <div className="selection-summary"><span>Clone endpoint</span><strong>{module.title}</strong><small>CLONE OF {source.label} · SHARED SOURCE</small></div>
+    <div className="selection-summary"><span>Legacy shared endpoint</span><strong>{module.title}</strong><small>SHARED WITH {source.label}</small></div>
     <section className="clone-inherited-source" aria-label={`Inherited source programming from ${source.label}`}>
-      <span>SOURCE: {source.label.replace(" ", "")}</span><strong>SINE</strong><b>{audio.frequency} Hz</b><b>LEVEL {audio.level}%</b><small>LOCKED — ADJUST AT SOURCE</small>
+      <span>SOURCE: {source.label.replace(" ", "")}</span><strong>{generatorName.toUpperCase()}</strong><b>{audio.frequency} Hz</b><b>LEVEL {audio.level}%</b><small>LOCKED — ADJUST AT SOURCE</small>
     </section>
-    <details className="inspector-section" open><summary>Endpoint state</summary><div className="connection-summary"><span>Identity</span><b>{channel.label} CLONE</b><span>Lineage</span><b>{source.label}</b><span>Routing</span><b>{state.channelTerminalConnections.some((connection) => connection.fromModuleId === module.id) ? "ROUTED" : "AWAITING CHANNEL OUT"}</b><span>Control</span><b>POSITION + LIVE TRIM AT SOUND DESK</b></div></details>
+    <details className="inspector-section" open><summary>Endpoint state</summary><div className="connection-summary"><span>Identity</span><b>{channel.label} SHARED ENDPOINT</b><span>Lineage</span><b>{source.label}</b><span>Routing</span><b>{state.channelTerminalConnections.some((connection) => connection.fromModuleId === module.id) ? "ROUTED" : "AWAITING CHANNEL OUT"}</b><span>Control</span><b>POSITION + LIVE TRIM AT SOUND DESK</b></div></details>
     <p className="inspector-note">Waveform, frequency and programmed level are inherited. Select {source.label} to adjust shared source programming.</p>
     <div className="lifecycle-actions clone-actions"><button className="danger" onClick={() => { applicationAudioRuntime.disposeChannel(channel.id); dispatch({ type: "delete-endpoint", channelId: channel.id }); }}>Quick Delete</button></div>
   </div>;
   return <div className="inspector-content sine-source-inspector">
-    <div className="selection-summary"><span>{channel.role === "duplicate" ? "Independent duplicate" : "Placed source"}</span><strong>{module.title}</strong><small>{channelLabel} · Sine oscillator{channel.duplicatedFrom ? ` · DUPLICATED FROM ${state.threadChannels.find((item) => item.id === channel.duplicatedFrom)?.label ?? channel.duplicatedFrom}` : ""}</small></div>
-    <SinePlayerControls channelId={module.audioChannelId} label={channelLabel} audio={audio} />
+    <div className="selection-summary"><span>{channel.role === "duplicate" ? "Independent duplicate" : "Placed source"}</span><strong>{module.title}</strong><small>{channelLabel} · {generatorName} oscillator{channel.duplicatedFrom ? ` · DUPLICATED FROM ${state.threadChannels.find((item) => item.id === channel.duplicatedFrom)?.label ?? channel.duplicatedFrom}` : ""}</small></div>
+    <PitchedGeneratorControls channelId={module.audioChannelId} label={channelLabel} audio={audio} onGeneratorChange={(generatorType) => dispatch({ type: "set-source-generator", sourceChannelId: channel.id, generatorType })} />
     <details className="inspector-section"><summary>Source binding</summary><div className="connection-summary"><span>Identity</span><b>{channelLabel}</b><span>Output</span><b>ONE RESOLVED STREAM</b><span>Destination</span><b>ANY FREE CHANNEL OUT</b></div></details>
     <p className="inspector-note">Connect this source endpoint to any free Channel Out. Removing the node returns its player to Inputs &amp; Channels.</p>
-    <details className="inspector-section source-actions" open><summary>Source actions</summary><div className="lifecycle-actions"><button onClick={() => dispatch({ type: "clone-source", sourceChannelId: channel.id })}>Clone</button><button onClick={() => dispatch({ type: "duplicate-source", sourceChannelId: channel.id })}>Duplicate</button></div></details>
-    {clones.length ? <div className="cascade-delete"><strong>{clones.length} LINKED CLONE PATH{clones.length === 1 ? "" : "S"}</strong><p>Deleting this source will also destroy every linked Clone path.</p>{cascadeConfirmationOpen ? <div className="cascade-confirmation" role="alert" aria-live="assertive"><strong>DELETE SOURCE?</strong><p>This permanently removes {channel.label} and all {clones.length} linked Clone path{clones.length === 1 ? "" : "s"}. Unrelated sources keep playing. This cannot be undone.</p><div><button onClick={() => setCascadeConfirmationModuleId(null)}>CANCEL</button><button className="danger" onClick={() => { applicationAudioRuntime.disposeSource(channel.id); dispatch({ type: "delete-source-family", sourceChannelId: channel.id }); setCascadeConfirmationModuleId(null); }}>DELETE SOURCE + ALL CLONES</button></div></div> : <button className="danger" onClick={() => setCascadeConfirmationModuleId(module.id)}>DELETE SOURCE…</button>}</div> : <div className="lifecycle-actions clone-actions"><button className="danger" onClick={() => dispatch({ type: "delete-selection" })}>Remove from workspace</button></div>}
+    <details className="inspector-section source-actions" open><summary>Source actions</summary><div className="lifecycle-actions"><button onClick={() => dispatch({ type: "duplicate-source", sourceChannelId: channel.id })}>Duplicate</button><small>Additional spatial manifestations are created with Multi-Plot in Sound Desk.</small></div></details>
+    {dependentEndpointCount ? <div className="cascade-delete"><strong>{dependentEndpointCount} LINKED MULTI-PLOT{dependentEndpointCount === 1 ? "" : "S"}</strong><p>Deleting this source will also destroy every associated Multi-Plot manifestation.</p>{cascadeConfirmationOpen ? <div className="cascade-confirmation" role="alert" aria-live="assertive"><strong>DELETE SOURCE?</strong><p>This permanently removes {channel.label} and all {dependentEndpointCount} associated Multi-Plot manifestation{dependentEndpointCount === 1 ? "" : "s"}. Unrelated sources and Duplicates keep playing. This cannot be undone.</p><div><button onClick={() => setCascadeConfirmationModuleId(null)}>CANCEL</button><button className="danger" onClick={() => { applicationAudioRuntime.disposeSource(channel.id); dispatch({ type: "delete-source-family", sourceChannelId: channel.id }); setCascadeConfirmationModuleId(null); }}>DELETE SOURCE + ALL MULTI-PLOTS</button></div></div> : <button className="danger" onClick={() => setCascadeConfirmationModuleId(module.id)}>DELETE SOURCE…</button>}</div> : <div className="lifecycle-actions clone-actions"><button className="danger" onClick={() => dispatch({ type: "delete-selection" })}>Remove from workspace</button></div>}
   </div>;
 }
 
@@ -769,8 +1017,9 @@ function MasterSafetyMeter({ reportingEnabled = true }: { reportingEnabled?: boo
   </div>;
 }
 
-function Monitor({ state, selectedModule, selectedModules, selectedConnection, audioDiagnosticMode = "full" }: {
+function Monitor({ state, spatialRouting, selectedModule, selectedModules, selectedConnection, audioDiagnosticMode = "full" }: {
   state: AppState;
+  spatialRouting: SpatialRoutingState;
   selectedModule: ModuleInstance | null;
   selectedModules: ModuleInstance[];
   selectedConnection: ThreadConnection | null;
@@ -782,13 +1031,13 @@ function Monitor({ state, selectedModule, selectedModules, selectedConnection, a
   const audio = useAudioChannel(currentChannel?.id ?? null);
   const soundingChannelIds = applicationAudioRuntime.getSoundingChannelIds();
   const soundingChannelKey = soundingChannelIds.join(",");
-  const traceColorKey = soundingChannelIds.map((channelId) => MUTED_ACCENTS.find((accent) => accent.id === state.threadChannels.find((channel) => channel.id === channelId)?.accentId)?.value ?? "").join(",");
+  const traceColorKey = soundingChannelIds.map((channelId) => MUTED_ACCENTS.find((accent) => accent.id === (state.threadChannels.find((channel) => channel.id === channelId)?.accentId ?? spatialRouting.channels.find((plot) => plot.id === channelId)?.accentId))?.value ?? "").join(",");
   const meterEnabled = diagnosticMeterEnabled(audioDiagnosticMode);
   const scopeEnabled = diagnosticScopeEnabled(audioDiagnosticMode);
   const soundDeskMuted = Boolean(audio?.active && audio.routable && audio.liveTrim === LIVE_TRIM_MIN);
   const display = selectedModule ? getModuleDisplay(selectedModule) : null;
   const audioFocused = Boolean(audio && currentChannel && (selectedChannel || sourceChannel || !state.selection));
-  const focusTitle = audioFocused ? "SINE" : selectedModules.length > 1 ? `${selectedModules.length} NODES` : selectedModule ? selectedModule.title : selectedConnection ? "THREAD" : selectedChannel ? selectedChannel.label : "IDLE";
+  const focusTitle = audioFocused && audio ? generatorLabel(audio.generatorType).toUpperCase() : selectedModules.length > 1 ? `${selectedModules.length} NODES` : selectedModule ? selectedModule.title : selectedConnection ? "THREAD" : selectedChannel ? selectedChannel.label : "IDLE";
   const focusType = audioFocused && audio ? `${audio.frequency} Hz · LEVEL ${audio.level}%` : selectedModule ? selectedModule.type.replaceAll("-", " ").toUpperCase() : selectedConnection ? "COMMITTED CONNECTION" : selectedChannel ? "CHANNEL OUTPUT" : "NO OBJECT SELECTED";
   const focusDetail = audioFocused && audio ? soundDeskMuted ? "SD MUTED · SOUND DESK LIVE TRIM -100%" : audio.active && !audio.routable ? "UNROUTED · NO CHANNEL OUT" : audio.active ? "ACTIVE · CENTRED OUTPUT" : audio.availability === "error" ? audio.message : "SILENT · READY" : selectedModule && display ? `${display.detail} · ${display.value}` : selectedConnection ? selectedConnection.id : selectedChannel ? (state.channelTerminalConnections.some((connection) => connection.channelId === selectedChannel.id) ? "OUTPUT READY" : "AWAITING OUTPUT") : "Select a node, Thread, or channel";
   return <div className="monitor-content" role="status" aria-live="polite" aria-label="Selection monitor">
@@ -800,22 +1049,39 @@ function Monitor({ state, selectedModule, selectedModules, selectedConnection, a
   </div>;
 }
 
+function deleteSelectionWithSpatialGuard(state: AppState, spatialRouting: SpatialRoutingState, dispatch: React.Dispatch<Parameters<typeof appReducer>[1]>) {
+  const selectedIds = getSelectedModuleIds(state.selection);
+  const protectedModule = state.modules.find((module) => {
+    if (!selectedIds.includes(module.id) || !module.audioChannelId) return false;
+    const channel = state.threadChannels.find((item) => item.id === module.audioChannelId && item.role !== "clone");
+    return Boolean(channel && spatialRouting.channels.some((plot) => plot.isMultiPlot && plot.sourceId === channel.id));
+  });
+  if (protectedModule?.audioChannelId) {
+    dispatch({ type: "select-module", id: protectedModule.id });
+    dispatch({ type: "set-status", value: `${protectedModule.audioChannelId.replace("channel-", "CH ")} has linked Multi-Plots — confirm source deletion in Inspector` });
+    return;
+  }
+  dispatch({ type: "delete-selection" });
+}
+
 export default function Home() {
   const isDevelopment = process.env.NODE_ENV === "development";
   const audioDiagnosticMode = useAudioDiagnosticMode();
   const [state, dispatch] = useReducer(appReducer, undefined, createInitialState);
   const [spatialRouting, dispatchSpatialRouting] = useReducer(spatialRoutingReducer, undefined, createInitialSpatialRoutingState);
+  const [activeWorkspace, setActiveWorkspace] = useState<WorkspaceId>("threads");
   useEffect(() => {
     dispatchSpatialRouting({ type: "sync-channels", channels: state.threadChannels });
   }, [state.threadChannels]);
   useEffect(() => {
     const routableIds = new Set(getIncomingChannels(state).filter((channel) => channel.status === "complete").map((channel) => channel.id));
-    state.threadChannels.forEach((channel) => applicationAudioRuntime.setChannelRoutable(channel.id, routableIds.has(channel.id)));
-    spatialRouting.channels.forEach((channel) => {
-      if (channel.assignment && !routableIds.has(channel.id)) dispatchSpatialRouting({ type: "unassign-channel", channelId: channel.id });
+    const assignedSourceIds = new Set(spatialRouting.channels.filter((plot) => plot.assignment).map((plot) => plot.sourceId));
+    spatialRouting.channels.forEach((plot) => {
+      const threadsAudition = activeWorkspace === "threads" && !plot.isMultiPlot && !assignedSourceIds.has(plot.sourceId);
+      applicationAudioRuntime.setChannelRoutable(plot.id, routableIds.has(plot.channelId) && (Boolean(plot.assignment) || threadsAudition));
+      if (plot.assignment && !routableIds.has(plot.channelId)) dispatchSpatialRouting({ type: "unassign-channel", channelId: plot.id });
     });
-  }, [spatialRouting.channels, state]);
-  const [activeWorkspace, setActiveWorkspace] = useState<WorkspaceId>("threads");
+  }, [activeWorkspace, spatialRouting.channels, state]);
   const [workspaceTransition, setWorkspaceTransition] = useState<WorkspaceTransitionDirection | null>(null);
   const [workspaceTransitionKey, setWorkspaceTransitionKey] = useState(0);
   const [theme, setTheme] = useState<ThemeMode>("light");
@@ -839,6 +1105,7 @@ export default function Home() {
   const selectedConnection = state.selection?.kind === "connection" ? state.connections.find((connection) => connection.id === state.selection?.id) ?? null : null;
   const elapsedText = formatElapsed(getElapsedMs(state.session, clockNow));
   const benchmark = state.modules.length >= 32;
+  const requestDeleteSelection = () => deleteSelectionWithSpatialGuard(state, spatialRouting, dispatch);
 
   useEffect(() => {
     (window as Window & { __rfeAudioRuntime?: typeof applicationAudioRuntime }).__rfeAudioRuntime = applicationAudioRuntime;
@@ -846,13 +1113,21 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    applicationAudioRuntime.synchronizeTopology(state.threadChannels);
+    const multiPlotTopology = spatialRouting.channels.filter((plot) => plot.isMultiPlot).map((plot) => ({ id: plot.id, sourceId: plot.sourceId }));
+    applicationAudioRuntime.synchronizeTopology([...state.threadChannels, ...multiPlotTopology]);
     state.threadChannels.forEach((channel) => {
       if (channel.role !== "duplicate" || !channel.duplicatedFrom || copiedDuplicateIds.current.has(channel.id)) return;
       applicationAudioRuntime.copyProgramming(channel.duplicatedFrom, channel.id);
       copiedDuplicateIds.current.add(channel.id);
     });
-  }, [state.threadChannels]);
+  }, [spatialRouting.channels, state.threadChannels]);
+
+  useEffect(() => {
+    state.modules.forEach((module) => {
+      if (!module.audioChannelId || !isPitchedGeneratorModule(module)) return;
+      applicationAudioRuntime.setGenerator(module.audioChannelId, module.generatorType ?? "sine");
+    });
+  }, [state.modules]);
 
   useEffect(() => {
     spatialRouting.channels.forEach((channel) => {
@@ -890,13 +1165,13 @@ export default function Home() {
     const keydown = (event: globalThis.KeyboardEvent) => {
       if (event.key === "Delete" || event.key === "Backspace") {
         if ((event.target as HTMLElement)?.matches("input, select, textarea")) return;
-        dispatch({ type: "delete-selection" });
+        deleteSelectionWithSpatialGuard(state, spatialRouting, dispatch);
       }
       if (event.key === "Escape") dispatch({ type: "cancel-connection" });
     };
     window.addEventListener("keydown", keydown);
     return () => window.removeEventListener("keydown", keydown);
-  }, []);
+  }, [spatialRouting, state]);
 
   const persistUIState = (nextTheme: ThemeMode, nextConfigs: Record<ThemeMode, UIConfig>, modules: ModuleInstance[]) => {
     if (!isDevelopment || typeof window === "undefined") return;
@@ -989,7 +1264,7 @@ export default function Home() {
     {activeWorkspace === "threads" ? <div className="studio-arrangement" aria-label="Threads workspace" data-workspace-surface="threads">
       <WindowFrame title="Threads / Construction" className="main-window" trailing={<span aria-hidden="true" />}>
         <div className={`main-body ${inputsCollapsed ? "inputs-collapsed" : ""}`}>
-          <InputsAndChannels state={state} collapsed={inputsCollapsed} onToggle={() => setInputsCollapsed((value) => !value)} dispatch={dispatch} />
+          <InputsAndChannels state={state} spatialRouting={spatialRouting} collapsed={inputsCollapsed} onToggle={() => setInputsCollapsed((value) => !value)} dispatch={dispatch} />
           <div className="workspace-region"><div className="workspace-toolbar"><div className="tool-cluster" aria-label="Canvas tools"><button className={state.tool === "select" ? "tool-active" : ""} aria-label="Select tool" onClick={() => dispatch({ type: "set-tool", value: "select" })}>↖</button><button className={state.tool === "pan" ? "tool-active" : ""} aria-label="Pan tool" onClick={() => dispatch({ type: "set-tool", value: "pan" })}>✥</button><button className={state.gridVisible ? "tool-active" : ""} aria-label="Toggle grid" aria-pressed={state.gridVisible} onClick={() => dispatch({ type: "toggle-grid" })}>⠿</button></div><span className="workspace-context">THREAD CONSTRUCTION · {state.statusMessage}</span><SessionTransport dispatch={dispatch} /><div className="zoom-control"><button aria-label="Zoom out" onClick={() => dispatch({ type: "set-zoom", value: state.zoom - 10 })}>−</button><span>{state.zoom}%</span><button aria-label="Zoom in" onClick={() => dispatch({ type: "set-zoom", value: state.zoom + 10 })}>＋</button></div><div className="layout-switch" aria-label="Layout mode"><button className={state.layout === "studio" ? "active" : ""} onClick={() => dispatch({ type: "set-layout", value: "studio" })}>Studio</button><button className={state.layout === "compact" ? "active" : ""} onClick={() => dispatch({ type: "set-layout", value: "compact" })}>Compact</button></div><button className="toolbar-toggle" aria-expanded={toolbarExpanded} aria-controls="workspace-secondary-tools" onClick={() => setToolbarExpanded((value) => !value)}>{toolbarExpanded ? "Hide tools ↑" : "More tools ↓"}</button></div>
             {toolbarExpanded && <div id="workspace-secondary-tools" className="workspace-editbar" aria-label="Module editing tools">
               <label><span>Add</span><select aria-label="Module type to add" value={addModuleType} onChange={(event) => setAddModuleType(event.target.value as ModuleTemplateType)}>{MODULE_LIBRARY.map((item) => <option key={item.type} value={item.type}>{item.title}</option>)}</select></label>
@@ -1001,7 +1276,7 @@ export default function Home() {
               <i aria-hidden="true" />
               <button onClick={() => dispatch({ type: "select-all-modules" })}>Select all</button>
               <button disabled={!selectedModuleIds.length} onClick={() => dispatch({ type: "duplicate-selection" })}>Duplicate selected</button>
-              <button disabled={!selectedModuleIds.length} className="danger" onClick={() => dispatch({ type: "delete-selection" })}>Delete selected</button>
+              <button disabled={!selectedModuleIds.length} className="danger" onClick={requestDeleteSelection}>Delete selected</button>
               <button disabled={!state.modules.length} className="danger clear-workspace" onClick={() => { if (window.confirm("Clear all modules and Threads from the workspace?")) dispatch({ type: "clear-workspace" }); }}>Clear workspace</button>
               <label className="toolbar-preset"><span>Preset</span><select aria-label="Preset" value={state.presetName === "RFE_32x32_Benchmark" ? "benchmark" : state.presetName.startsWith("RFE_User") ? "saved" : "default"} onChange={(event) => loadPreset(event.target.value)}><option value="default">RFE_Default_Test</option><option value="benchmark">RFE_32x32_Benchmark</option><option value="saved">Saved User Preset</option></select></label>
               <button onClick={() => saveSnapshot(false)}>Save</button><button onClick={() => saveSnapshot(true)}>Save as…</button>
@@ -1022,8 +1297,8 @@ export default function Home() {
             </div>
           </div></div>
       </WindowFrame>
-      <WindowFrame title="Thread Inspector" className="inspector-window"><Inspector state={state} selectedModule={selectedModule} selectedModules={selectedModules} selectedConnection={selectedConnection} uiConfig={uiConfig} updateParameter={updateParameter} setAccent={(accentId) => selectedModule && dispatch({ type: "set-accent", id: selectedModule.id, accentId })} setHighlightStyle={setHighlightStyle} setHighlightWeight={setHighlightWeight} dispatch={dispatch} /></WindowFrame>
-      <WindowFrame title="Monitor" className="diagnostics-window monitor-window" compactControls><Monitor state={state} selectedModule={selectedModule} selectedModules={selectedModules} selectedConnection={selectedConnection} audioDiagnosticMode={audioDiagnosticMode} /></WindowFrame>
+      <WindowFrame title="Thread Inspector" className="inspector-window"><Inspector state={state} spatialRouting={spatialRouting} selectedModule={selectedModule} selectedModules={selectedModules} selectedConnection={selectedConnection} uiConfig={uiConfig} updateParameter={updateParameter} setAccent={(accentId) => selectedModule && dispatch({ type: "set-accent", id: selectedModule.id, accentId })} setHighlightStyle={setHighlightStyle} setHighlightWeight={setHighlightWeight} onDeleteSelection={requestDeleteSelection} dispatch={dispatch} /></WindowFrame>
+      <WindowFrame title="Monitor" className="diagnostics-window monitor-window" compactControls><Monitor state={state} spatialRouting={spatialRouting} selectedModule={selectedModule} selectedModules={selectedModules} selectedConnection={selectedConnection} audioDiagnosticMode={audioDiagnosticMode} /></WindowFrame>
     </div> : activeWorkspace === "sound-desk" ? <SoundDeskWorkspace threadsState={state} state={spatialRouting} dispatch={dispatchSpatialRouting} sessionDispatch={dispatch} /> : <VisualiserWorkspace state={spatialRouting} sessionDispatch={dispatch} />}
     </div>
     <WorkspaceNavigation workspace={activeWorkspace} navigate={navigateWorkspace} />
