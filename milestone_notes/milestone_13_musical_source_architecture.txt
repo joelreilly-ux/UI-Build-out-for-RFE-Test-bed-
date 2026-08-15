@@ -2,7 +2,7 @@ MILESTONE 13 — MUSICAL SOURCE ARCHITECTURE + FIRST GENERATOR EXPANSION
 
 STATUS
 
-USER-ACCEPTED hard-save candidate on `agent/milestone-13`. It preserves the accepted M12 work over M11 hard-save HEAD `a54e9599e10080a8ad4b325ec78c316faf2f48fd`. Publication and promotion to the authoritative GitHub baseline were explicitly authorised on 2026-08-15.
+USER-ACCEPTED AND PROMOTED through implementation commit `3be2f6e9f94b6946facefc60825559fcefb56b87`, merged by GitHub PR #2 to `milestone/ui-interaction-harness` as `cec46def328b8341f87222b84ffc903eac1fb7bc`. It preserves the accepted M12 work over previous M11 hard-save HEAD `a54e9599e10080a8ad4b325ec78c316faf2f48fd`.
 
 1. VERIFIED START
 
