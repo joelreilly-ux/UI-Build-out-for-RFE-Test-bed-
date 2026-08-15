@@ -6,7 +6,7 @@ State:
 - APPROVED THROUGH: Milestone 13 (M12–M13 hard-save publication authorised 2026-08-15).
 - QUALIFIED BATCH: M10 / M10.1 / M11 / M12 / M13, including accepted browser-regression remediation and diagnostic history.
 - Authoritative branch: `milestone/ui-interaction-harness`.
-- Qualified implementation commit: `7cf92aa7b61b9363d67eb332275f1a258c5c103c`.
+- Qualified M12–M13 implementation commit: `3be2f6e9f94b6946facefc60825559fcefb56b87`; GitHub merge commit: `cec46def328b8341f87222b84ffc903eac1fb7bc`.
 - Previous approved M09: `9af3b8d5d64f8a1bdfbb34f01828c2003a24b314`, preserved in ancestry.
 - Historical review branch: `review/m10-safety-audit` at the qualified implementation commit; it is review evidence, not development authority.
 - Current development phase: M13 musical-source architecture, generator expansion, recording-safe Multi-Plot delivery, and cluster workflow are user-accepted on `agent/milestone-13` and authorised for promotion to the authoritative branch.
@@ -419,10 +419,10 @@ M12 ACCEPTED LOCAL CANDIDATE FINGERPRINT — 2026-08-14
 - Verification: see `milestone_notes/milestone_12_sound_desk_multi_plot.txt` for the complete candidate qualification and manual acceptance steps.
 - Boundary: user authorised M13 without promoting M12. Do not merge, promote, alter M11 Git authority, or begin M14/later roadmap work without explicit approval.
 
-M13 USER-ACCEPTED HARD-SAVE CANDIDATE FINGERPRINT — 2026-08-15
+M13 BASELINE FINGERPRINT — 2026-08-15
 
-- Status: USER-ACCEPTED; publication and promotion explicitly authorised 2026-08-15.
-- Candidate branch: `agent/milestone-13`; approved hard-save HEAD remains `a54e9599e10080a8ad4b325ec78c316faf2f48fd`.
+- Status: USER-ACCEPTED, MERGED, AND PROMOTED.
+- Implementation commit: `3be2f6e9f94b6946facefc60825559fcefb56b87`; merged to `milestone/ui-interaction-harness` by GitHub PR #2 as `cec46def328b8341f87222b84ffc903eac1fb7bc`. Previous M11 hard-save HEAD: `a54e9599e10080a8ad4b325ec78c316faf2f48fd`.
 - Product change: one reusable finite pitch instruction now drives the Sine, Triangle, and Saw pitched-generator family through the established lifecycle and routing graph.
 - Ownership: Duplicate copies generator programming then remains independent; Multi-Plot retains one source oscillator and independent spatial endpoints.
 - Small edits: module port targets are 150% of configured size, live Multi-Plot insertion is deliberately staged for recording safety, and Sound Desk exposes an explicit sounding/total/source tally.
@@ -435,4 +435,4 @@ M13 USER-ACCEPTED HARD-SAVE CANDIDATE FINGERPRINT — 2026-08-15
 - Seventh post-trial remediation: the 3+ Plot Point Folder marker is now a drag handle for its complete co-located cluster. Cluster movement is one atomic spatial-state action and previews every endpoint panner together. It does not bind membership: any folder endpoint can still be selected and routed to another point individually, and REMOVE continues to delete only the chosen Multi-Plot. Model coverage and the production browser journey prove cluster move, individual departure, and independent deletion in sequence.
 - Eighth post-trial remediation: an individual can now be pulled free without the unplot/find/replot detour. Double-click any folder-list member to expose that endpoint as an immediately draggable live plot; the selected member can also be pulled with a double-click on the grid folder marker, and the marker defaults to the front endpoint when none is selected. The route remains live, the remaining occupants stay clustered, and the normal drag workflow commits the detached endpoint to its new coordinate. Browser coverage proves a selected list member can leave a moved three-endpoint cluster independently.
 - Verification: see `milestone_notes/milestone_13_musical_source_architecture.txt` for the full qualification and manual musical acceptance procedure.
-- Acceptance: the final user test found the workflow responsive and user-friendly, with no bad noise or misbehaving functions. M12–M13 is authorised to become the new GitHub baseline. Do not begin M14 without a new explicit brief.
+- Acceptance: the final user test found the workflow responsive and user-friendly, with no bad noise or misbehaving functions. M12–M13 is the authoritative GitHub baseline. Do not begin M14 without a new explicit brief.
