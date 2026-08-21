@@ -49,11 +49,11 @@ test("modules can be added, renamed and deleted with attached Threads cleaned up
 test("additive selection supports group movement, internal Thread duplication and batch deletion", () => {
   let state = createInitialState();
   state = appReducer(state, { type: "select-module", id: "notes" });
-  state = appReducer(state, { type: "select-module", id: "chord", additive: true });
-  assert.deepEqual(getSelectedModuleIds(state.selection), ["notes", "chord"]);
-  const originalChord = state.modules.find((module) => module.id === "chord").position;
+  state = appReducer(state, { type: "select-module", id: "pattern", additive: true });
+  assert.deepEqual(getSelectedModuleIds(state.selection), ["notes", "pattern"]);
+  const originalPattern = state.modules.find((module) => module.id === "pattern").position;
   state = appReducer(state, { type: "move-module", id: "notes", position: { x: 9, y: 12 } });
-  assert.deepEqual(state.modules.find((module) => module.id === "chord").position, { x: originalChord.x + 4, y: originalChord.y + 5 });
+  assert.deepEqual(state.modules.find((module) => module.id === "pattern").position, { x: originalPattern.x + 4, y: originalPattern.y + 5 });
   const duplicated = appReducer(state, { type: "duplicate-selection" });
   const duplicateIds = getSelectedModuleIds(duplicated.selection);
   assert.equal(duplicated.modules.length, state.modules.length + 2);

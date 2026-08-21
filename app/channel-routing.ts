@@ -63,9 +63,9 @@ export function getChannelDefinition(state: Pick<ChannelSourceState, "threadChan
 
 export function getIncomingChannels(state: ChannelSourceState): IncomingChannel[] {
   return state.threadChannels.map((definition) => {
-    const boundSource = state.modules.find((module) => module.audioChannelId === definition.id);
-    const connection = boundSource
-      ? state.channelTerminalConnections.find((item) => item.fromModuleId === boundSource.id)
+    const boundSourceIds = new Set(state.modules.filter((module) => module.audioChannelId === definition.id).map((module) => module.id));
+    const connection = boundSourceIds.size
+      ? state.channelTerminalConnections.find((item) => boundSourceIds.has(item.fromModuleId))
       : state.channelTerminalConnections.find((item) => item.channelId === definition.id && !state.modules.find((module) => module.id === item.fromModuleId)?.audioChannelId);
     const source = connection ? state.modules.find((module) => module.id === connection.fromModuleId) : null;
     const complete = Boolean(source?.enabled && source.ports.output);

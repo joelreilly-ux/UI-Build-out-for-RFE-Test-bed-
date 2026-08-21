@@ -33,6 +33,7 @@ import {
   getElapsedMs,
   getModuleDisplay,
   getSelectedModuleIds,
+  isArpeggioProcessorModule,
   isPitchedGeneratorModule,
   MODULE_LIBRARY,
   sanitizeRestoredState,
@@ -42,7 +43,7 @@ import {
   type ModuleTemplateType,
   type ThreadConnection,
 } from "./interaction-state";
-import { PITCHED_GENERATOR_TYPES, generatorLabel, type PitchedGeneratorType } from "./musical-source";
+import { ARPEGGIO_PATTERNS, ARPEGGIO_PITCH_MAX, ARPEGGIO_PITCH_MIN, ARPEGGIO_RATE_MAX_MS, ARPEGGIO_RATE_MIN_MS, PITCHED_GENERATOR_TYPES, generatorLabel, type ArpeggioDirection, type ArpeggioPattern, type PitchedGeneratorType } from "./musical-source";
 import {
   BASELINE_UI_CONFIG,
   DARK_UI_CONFIG,
@@ -790,6 +791,7 @@ function Inspector({ state, spatialRouting, selectedModule, selectedModules, sel
   </div>;
   if (!selectedModule) return <div className="inspector-content empty-inspector">Select a module or Thread.</div>;
   if (isPitchedGeneratorModule(selectedModule) && selectedModule.audioChannelId) return <PitchedGeneratorInspector state={state} spatialRouting={spatialRouting} module={selectedModule} dispatch={dispatch} />;
+  if (isArpeggioProcessorModule(selectedModule) && selectedModule.audioChannelId) return <ArpeggioProcessorInspector state={state} module={selectedModule} dispatch={dispatch} />;
   const disabled = !selectedModule.enabled;
   const p = selectedModule.parameters;
   return <div className="inspector-content">
@@ -797,9 +799,10 @@ function Inspector({ state, spatialRouting, selectedModule, selectedModules, sel
     <label className="rename-field"><span>Node name</span><input aria-label="Node name" maxLength={48} value={selectedModule.title} onChange={(event) => dispatch({ type: "rename-module", id: selectedModule.id, title: event.target.value })} /></label>
     <details className="inspector-section appearance-section"><summary>Appearance</summary><AccentSelector value={selectedModule.accentId} style={uiConfig.nodes.groupingAccentStyle} weight={uiConfig.nodes.groupingAccentThickness} disabled={disabled} onChange={setAccent} onStyleChange={setHighlightStyle} onWeightChange={setHighlightWeight} /></details>
     {disabled && <div className="unavailable-notice" role="status">Future module — controls and connections are unavailable.</div>}
-    <details className="inspector-section"><summary>Note / Chord</summary>
+    {selectedModule.type === "pattern-trigger" && <div className="unavailable-notice legacy-trigger-notice" role="status">LEGACY UI PATTERN TRIGGER · NOT AN AUDIO PROCESSOR. Add Arpeggio from the SOUND MODULES top bar.</div>}
+    <details className="inspector-section"><summary>Note / Pattern</summary>
       <div className="segmented">{(["mono", "poly", "arp"] as const).map((mode) => <button disabled={disabled} key={mode} className={p.mode === mode ? "active" : ""} onClick={() => updateParameter("mode", mode)}>{mode[0].toUpperCase() + mode.slice(1)}</button>)}</div>
-      <label className="form-row"><span>Note Source</span><select disabled={disabled} className="select-control" value={p.noteSource} onChange={(event) => updateParameter("noteSource", event.target.value)}><option>Chord Trigger</option><option>Note Buttons</option><option>Custom Note</option></select></label>
+      <label className="form-row"><span>Note Source</span><select disabled={disabled} className="select-control" value={p.noteSource} onChange={(event) => updateParameter("noteSource", event.target.value)}><option>Pattern Trigger</option><option>Note Buttons</option><option>Custom Note</option></select></label>
       <label className="form-row"><span>Root Note</span><select disabled={disabled} className="select-control" value={p.rootNote} onChange={(event) => updateParameter("rootNote", event.target.value)}>{rootNotes.map((note) => <option key={note}>{note}</option>)}</select></label>
       <label className="form-row"><span>Scale</span><select disabled={disabled} className="select-control" value={p.scale} onChange={(event) => updateParameter("scale", event.target.value)}>{scales.map((scale) => <option key={scale}>{scale}</option>)}</select></label>
     </details>
@@ -928,6 +931,7 @@ function PitchedGeneratorInspector({ state, spatialRouting, module, dispatch }: 
   const multiPlots = spatialRouting.channels.filter((plot) => plot.isMultiPlot && plot.sourceId === channel.id);
   const dependentEndpointCount = sharedEndpoints.length + multiPlots.length;
   const generatorName = generatorLabel(audio.generatorType);
+  const arpeggioModule = state.modules.find((item) => isArpeggioProcessorModule(item) && item.audioChannelId === channel.id);
   if (channel.role === "clone") return <div className="inspector-content sine-source-inspector clone-source-inspector">
     <div className="selection-summary"><span>Legacy shared endpoint</span><strong>{module.title}</strong><small>SHARED WITH {source.label}</small></div>
     <section className="clone-inherited-source" aria-label={`Inherited source programming from ${source.label}`}>
@@ -940,10 +944,36 @@ function PitchedGeneratorInspector({ state, spatialRouting, module, dispatch }: 
   return <div className="inspector-content sine-source-inspector">
     <div className="selection-summary"><span>{channel.role === "duplicate" ? "Independent duplicate" : "Placed source"}</span><strong>{module.title}</strong><small>{channelLabel} · {generatorName} oscillator{channel.duplicatedFrom ? ` · DUPLICATED FROM ${state.threadChannels.find((item) => item.id === channel.duplicatedFrom)?.label ?? channel.duplicatedFrom}` : ""}</small></div>
     <PitchedGeneratorControls channelId={module.audioChannelId} label={channelLabel} audio={audio} onGeneratorChange={(generatorType) => dispatch({ type: "set-source-generator", sourceChannelId: channel.id, generatorType })} />
-    <details className="inspector-section"><summary>Source binding</summary><div className="connection-summary"><span>Identity</span><b>{channelLabel}</b><span>Output</span><b>ONE RESOLVED STREAM</b><span>Destination</span><b>ANY FREE CHANNEL OUT</b></div></details>
+    <details className="inspector-section"><summary>Source binding</summary><div className="connection-summary"><span>Identity</span><b>{channelLabel}</b><span>Programming</span><b>{arpeggioModule ? `${generatorName.toUpperCase()} → ARPEGGIO → PLOTTED REFERENT` : `${generatorName.toUpperCase()} → PLOTTED REFERENT`}</b><span>Output</span><b>ONE PERSISTENT PERFORMER</b><span>Destination</span><b>ANY FREE CHANNEL OUT</b></div></details>
     <p className="inspector-note">Connect this source endpoint to any free Channel Out. Removing the node returns its player to Inputs &amp; Channels.</p>
-    <details className="inspector-section source-actions" open><summary>Source actions</summary><div className="lifecycle-actions"><button onClick={() => dispatch({ type: "duplicate-source", sourceChannelId: channel.id })}>Duplicate</button><small>Additional spatial manifestations are created with Multi-Plot in Sound Desk.</small></div></details>
+    <details className="inspector-section source-actions" open><summary>Source actions</summary><div className="lifecycle-actions"><button onClick={() => dispatch({ type: "duplicate-source", sourceChannelId: channel.id })}>Duplicate</button>{arpeggioModule ? <button onClick={() => dispatch({ type: "select-module", id: arpeggioModule.id })}>EDIT ARPEGGIO</button> : <span className="modulebar-hint">ADD ARPEGGIO FROM THE SOUND MODULES TOP BAR</span>}<small>Multi-Plot remains downstream spatial fan-out.</small></div></details>
     {dependentEndpointCount ? <div className="cascade-delete"><strong>{dependentEndpointCount} LINKED MULTI-PLOT{dependentEndpointCount === 1 ? "" : "S"}</strong><p>Deleting this source will also destroy every associated Multi-Plot manifestation.</p>{cascadeConfirmationOpen ? <div className="cascade-confirmation" role="alert" aria-live="assertive"><strong>DELETE SOURCE?</strong><p>This permanently removes {channel.label} and all {dependentEndpointCount} associated Multi-Plot manifestation{dependentEndpointCount === 1 ? "" : "s"}. Unrelated sources and Duplicates keep playing. This cannot be undone.</p><div><button onClick={() => setCascadeConfirmationModuleId(null)}>CANCEL</button><button className="danger" onClick={() => { applicationAudioRuntime.disposeSource(channel.id); dispatch({ type: "delete-source-family", sourceChannelId: channel.id }); setCascadeConfirmationModuleId(null); }}>DELETE SOURCE + ALL MULTI-PLOTS</button></div></div> : <button className="danger" onClick={() => setCascadeConfirmationModuleId(module.id)}>DELETE SOURCE…</button>}</div> : <div className="lifecycle-actions clone-actions"><button className="danger" onClick={() => dispatch({ type: "delete-selection" })}>Remove from workspace</button></div>}
+  </div>;
+}
+
+function ArpeggioProcessorInspector({ state, module, dispatch }: { state: AppState; module: ModuleInstance; dispatch: React.Dispatch<Parameters<typeof appReducer>[1]> }) {
+  const audio = useAudioChannel(module.audioChannelId ?? null);
+  const sourceModule = state.modules.find((item) => isPitchedGeneratorModule(item) && item.audioChannelId === module.audioChannelId);
+  const channel = state.threadChannels.find((item) => item.id === module.audioChannelId);
+  if (!audio || !module.audioChannelId || !sourceModule || !channel) return null;
+  const generatorName = generatorLabel(audio.generatorType);
+  return <div className="inspector-content arpeggio-processor-inspector">
+    <div className="selection-summary"><span>Persistent pitch-traversal performer</span><strong>{module.title}</strong><small>{channel.label} · {generatorName.toUpperCase()} → ARPEGGIO → PLOTTED REFERENT</small></div>
+    <section className="arpeggio-controls" aria-label={`${channel.label} functional Arpeggio processor`}>
+      <div className="arpeggio-signal-path" aria-label={`${channel.label} source signal path`}><span>{generatorName.toUpperCase()}</span><i>→</i><strong>ARPEGGIO</strong><i>→</i><span>PLOTTED REFERENT</span></div>
+      <button className="arpeggio-toggle" aria-pressed={audio.arpeggioEnabled} onClick={() => { const enabled = !audio.arpeggioEnabled; applicationAudioRuntime.setArpeggioEnabled(module.audioChannelId!, enabled); dispatch({ type: "update-parameter", id: module.id, key: "status", value: enabled ? "active" : "bypassed" }); }}>{audio.arpeggioEnabled ? "BYPASS ARPEGGIO" : "ENABLE ARPEGGIO"}</button>
+      <div className="arpeggio-parameter-list">
+        <label><span>PATTERN</span><select aria-label={`${channel.label} arpeggio pattern`} value={audio.arpeggioPattern} onChange={(event) => applicationAudioRuntime.setArpeggioPattern(module.audioChannelId!, event.target.value as ArpeggioPattern)}>{Object.keys(ARPEGGIO_PATTERNS).map((pattern) => <option key={pattern} value={pattern}>{pattern.toUpperCase()}</option>)}</select></label>
+        <label><span>PITCHES</span><output>{audio.arpeggioPitchCount}</output><input aria-label={`${channel.label} arpeggio pitch count`} type="range" min={ARPEGGIO_PITCH_MIN} max={ARPEGGIO_PITCH_MAX} step="1" value={audio.arpeggioPitchCount} onChange={(event) => applicationAudioRuntime.setArpeggioPitchCount(module.audioChannelId!, Number(event.target.value))} /></label>
+        <label><span>RATE</span><output>{audio.arpeggioRateMs} ms</output><input aria-label={`${channel.label} arpeggio rate milliseconds`} type="range" min={ARPEGGIO_RATE_MIN_MS} max={ARPEGGIO_RATE_MAX_MS} step="10" value={audio.arpeggioRateMs} onChange={(event) => applicationAudioRuntime.setArpeggioRate(module.audioChannelId!, Number(event.target.value))} /></label>
+        <div className="arpeggio-direction" aria-label={`${channel.label} arpeggio direction`}>{(["up", "down", "up-down"] as ArpeggioDirection[]).map((direction) => <button key={direction} aria-pressed={audio.arpeggioDirection === direction} onClick={() => applicationAudioRuntime.setArpeggioDirection(module.audioChannelId!, direction)}>{direction.toUpperCase()}</button>)}</div>
+        <div className="arpeggio-readout" aria-live="polite"><span>INTERVALS {audio.arpeggioIntervals.join(" · ")}</span><strong>{audio.arpeggioCurrentFrequency} Hz</strong><small>STEP {audio.arpeggioStepIndex + 1} · CYCLE {audio.arpeggioCycleCount}</small></div>
+      </div>
+      <small className="arpeggio-note">{audio.arpeggioEnabled ? "ONE OSCILLATOR · SEQUENTIAL ARTICULATION · PERSISTENT WHILE TRANSPORT RUNS" : "STATIC-PITCH BYPASS"}</small>
+    </section>
+    <details className="inspector-section" open><summary>Ownership</summary><div className="connection-summary"><span>Root source</span><b>{sourceModule.title}</b><span>Performer</span><b>{audio.arpeggioEnabled ? "1 OSCILLATOR + 1 SCHEDULER" : "BYPASSED"}</b><span>Spatial fan-out</span><b>DOWNSTREAM / SHARED</b></div></details>
+    <p className="inspector-note">The upstream generator retains its timbre. Arpeggio continuously articulates one related pitch at a time; it feeds Channel Out and all plotted referents without multiplying performer engines.</p>
+    <div className="lifecycle-actions"><button onClick={() => dispatch({ type: "select-module", id: sourceModule.id })}>SELECT GENERATOR</button><button className="danger" onClick={() => { applicationAudioRuntime.setArpeggioEnabled(module.audioChannelId!, false); dispatch({ type: "remove-source-arpeggio", sourceChannelId: module.audioChannelId! }); }}>REMOVE ARPEGGIO</button></div>
   </div>;
 }
 
@@ -1038,7 +1068,7 @@ function Monitor({ state, spatialRouting, selectedModule, selectedModules, selec
   const display = selectedModule ? getModuleDisplay(selectedModule) : null;
   const audioFocused = Boolean(audio && currentChannel && (selectedChannel || sourceChannel || !state.selection));
   const focusTitle = audioFocused && audio ? generatorLabel(audio.generatorType).toUpperCase() : selectedModules.length > 1 ? `${selectedModules.length} NODES` : selectedModule ? selectedModule.title : selectedConnection ? "THREAD" : selectedChannel ? selectedChannel.label : "IDLE";
-  const focusType = audioFocused && audio ? `${audio.frequency} Hz · LEVEL ${audio.level}%` : selectedModule ? selectedModule.type.replaceAll("-", " ").toUpperCase() : selectedConnection ? "COMMITTED CONNECTION" : selectedChannel ? "CHANNEL OUTPUT" : "NO OBJECT SELECTED";
+  const focusType = audioFocused && audio ? `${audio.frequency} Hz · LEVEL ${audio.level}%${audio.arpeggioEnabled ? ` · ARPEGGIO ${audio.arpeggioRateMs} ms · ${audio.arpeggioDirection.toUpperCase()}` : ""}` : selectedModule ? selectedModule.type.replaceAll("-", " ").toUpperCase() : selectedConnection ? "COMMITTED CONNECTION" : selectedChannel ? "CHANNEL OUTPUT" : "NO OBJECT SELECTED";
   const focusDetail = audioFocused && audio ? soundDeskMuted ? "SD MUTED · SOUND DESK LIVE TRIM -100%" : audio.active && !audio.routable ? "UNROUTED · NO CHANNEL OUT" : audio.active ? "ACTIVE · CENTRED OUTPUT" : audio.availability === "error" ? audio.message : "SILENT · READY" : selectedModule && display ? `${display.detail} · ${display.value}` : selectedConnection ? selectedConnection.id : selectedChannel ? (state.channelTerminalConnections.some((connection) => connection.channelId === selectedChannel.id) ? "OUTPUT READY" : "AWAITING OUTPUT") : "Select a node, Thread, or channel";
   return <div className="monitor-content" role="status" aria-live="polite" aria-label="Selection monitor">
     <div className="monitor-focus"><span>CURRENT FOCUS</span><strong>{currentChannel ? `${currentChannel.label} / ${String(state.threadChannels.length).padStart(2, "0")}` : "NO CHANNEL"}</strong><small>{focusTitle}</small></div>
@@ -1091,7 +1121,7 @@ export default function Home() {
   const [canvasSize, setCanvasSize] = useState({ width: 800, height: 520 });
   const [narrowViewport, setNarrowViewport] = useState(false);
   const [draftPoint, setDraftPoint] = useState<{ x: number; y: number } | null>(null);
-  const [addModuleType, setAddModuleType] = useState<ModuleTemplateType>("note-length");
+  const [addModuleType, setAddModuleType] = useState<ModuleTemplateType>("sine-generator");
   const [inputsCollapsed, setInputsCollapsed] = useState(false);
   const [toolbarExpanded, setToolbarExpanded] = useState(false);
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -1102,6 +1132,11 @@ export default function Home() {
   const selectedModuleIds = getSelectedModuleIds(state.selection);
   const selectedModules = state.modules.filter((module) => selectedModuleIds.includes(module.id));
   const selectedModule = selectedModules.length === 1 ? selectedModules[0] : null;
+  const moduleTargetChannel = state.selection?.kind === "channel"
+    ? state.threadChannels.find((channel) => channel.id === state.selection?.id && channel.role !== "clone") ?? null
+    : selectedModule?.audioChannelId
+      ? state.threadChannels.find((channel) => channel.id === selectedModule.audioChannelId && channel.role !== "clone") ?? null
+      : [...state.threadChannels].reverse().find((channel) => channel.role !== "clone") ?? null;
   const selectedConnection = state.selection?.kind === "connection" ? state.connections.find((connection) => connection.id === state.selection?.id) ?? null : null;
   const elapsedText = formatElapsed(getElapsedMs(state.session, clockNow));
   const benchmark = state.modules.length >= 32;
@@ -1124,8 +1159,9 @@ export default function Home() {
 
   useEffect(() => {
     state.modules.forEach((module) => {
-      if (!module.audioChannelId || !isPitchedGeneratorModule(module)) return;
-      applicationAudioRuntime.setGenerator(module.audioChannelId, module.generatorType ?? "sine");
+      if (!module.audioChannelId) return;
+      if (isPitchedGeneratorModule(module)) applicationAudioRuntime.setGenerator(module.audioChannelId, module.generatorType ?? "sine");
+      if (isArpeggioProcessorModule(module)) applicationAudioRuntime.setArpeggioEnabled(module.audioChannelId, module.parameters.status !== "bypassed");
     });
   }, [state.modules]);
 
@@ -1266,9 +1302,13 @@ export default function Home() {
         <div className={`main-body ${inputsCollapsed ? "inputs-collapsed" : ""}`}>
           <InputsAndChannels state={state} spatialRouting={spatialRouting} collapsed={inputsCollapsed} onToggle={() => setInputsCollapsed((value) => !value)} dispatch={dispatch} />
           <div className="workspace-region"><div className="workspace-toolbar"><div className="tool-cluster" aria-label="Canvas tools"><button className={state.tool === "select" ? "tool-active" : ""} aria-label="Select tool" onClick={() => dispatch({ type: "set-tool", value: "select" })}>↖</button><button className={state.tool === "pan" ? "tool-active" : ""} aria-label="Pan tool" onClick={() => dispatch({ type: "set-tool", value: "pan" })}>✥</button><button className={state.gridVisible ? "tool-active" : ""} aria-label="Toggle grid" aria-pressed={state.gridVisible} onClick={() => dispatch({ type: "toggle-grid" })}>⠿</button></div><span className="workspace-context">THREAD CONSTRUCTION · {state.statusMessage}</span><SessionTransport dispatch={dispatch} /><div className="zoom-control"><button aria-label="Zoom out" onClick={() => dispatch({ type: "set-zoom", value: state.zoom - 10 })}>−</button><span>{state.zoom}%</span><button aria-label="Zoom in" onClick={() => dispatch({ type: "set-zoom", value: state.zoom + 10 })}>＋</button></div><div className="layout-switch" aria-label="Layout mode"><button className={state.layout === "studio" ? "active" : ""} onClick={() => dispatch({ type: "set-layout", value: "studio" })}>Studio</button><button className={state.layout === "compact" ? "active" : ""} onClick={() => dispatch({ type: "set-layout", value: "compact" })}>Compact</button></div><button className="toolbar-toggle" aria-expanded={toolbarExpanded} aria-controls="workspace-secondary-tools" onClick={() => setToolbarExpanded((value) => !value)}>{toolbarExpanded ? "Hide tools ↑" : "More tools ↓"}</button></div>
+            <div className="workspace-modulebar" role="region" aria-label="Channel sound modules">
+              <strong>SOUND MODULES</strong>
+              <label><span>ADD TO {moduleTargetChannel?.label ?? "SELECTED CHANNEL"}</span><select aria-label="Sound module to add" value={addModuleType} onChange={(event) => setAddModuleType(event.target.value as ModuleTemplateType)}>{MODULE_LIBRARY.map((item) => <option key={item.type} value={item.type}>{item.title}</option>)}</select></label>
+              <button disabled={!moduleTargetChannel} onClick={() => dispatch({ type: "add-module", moduleType: addModuleType, channelId: moduleTargetChannel?.id })}>ADD MODULE</button>
+              <small>Build the channel lineage on canvas: GENERATOR → ARPEGGIO → CHANNEL OUT → PLOTTED REFERENT</small>
+            </div>
             {toolbarExpanded && <div id="workspace-secondary-tools" className="workspace-editbar" aria-label="Module editing tools">
-              <label><span>Add</span><select aria-label="Module type to add" value={addModuleType} onChange={(event) => setAddModuleType(event.target.value as ModuleTemplateType)}>{MODULE_LIBRARY.map((item) => <option key={item.type} value={item.type}>{item.title}</option>)}</select></label>
-              <button onClick={() => dispatch({ type: "add-module", moduleType: addModuleType })}>Add module</button>
               <div className="workspace-width-controls" aria-label="Workspace width controls">
                 <span className="workspace-size" aria-live="polite">{Math.round(extendedCanvasSize.width)} px · {state.workspaceWidth}%</span>
                 <button aria-label={state.workspaceWidthDirection === "extend" ? "Extend workspace by 50%" : "Retract workspace by 50%"} onClick={() => dispatch({ type: "step-workspace-width" })}>{state.workspaceWidthDirection === "extend" ? "Extend +50%" : "Retract −50%"}</button>

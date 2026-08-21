@@ -82,6 +82,7 @@ function harness({ deferInsertions = false } = {}) {
   const contexts = [];
   const safetyNodes = [];
   const insertionTimers = [];
+  const performanceTimers = [];
   const scheduleInsertion = (callback, delayMs) => {
     const timer = { callback, delayMs, cancelled: false };
     insertionTimers.push(timer);
@@ -89,6 +90,12 @@ function harness({ deferInsertions = false } = {}) {
     return timer;
   };
   const cancelInsertion = (timer) => { timer.cancelled = true; };
+  const schedulePerformance = (callback, delayMs) => {
+    const timer = { callback, delayMs, cancelled: false };
+    performanceTimers.push(timer);
+    return timer;
+  };
+  const cancelPerformance = (timer) => { timer.cancelled = true; };
   const runtime = new ApplicationAudioRuntime(() => {
     const context = new FakeContext();
     contexts.push(context);
@@ -97,9 +104,17 @@ function harness({ deferInsertions = false } = {}) {
     const node = new FakeSafetyNode();
     safetyNodes.push(node);
     return node;
-  }, scheduleInsertion, cancelInsertion);
+  }, scheduleInsertion, cancelInsertion, schedulePerformance, cancelPerformance);
   const flushInsertions = () => insertionTimers.splice(0).filter((timer) => !timer.cancelled).forEach((timer) => timer.callback());
-  return { runtime, contexts, safetyNodes, insertionTimers, flushInsertions };
+  const flushPerformanceStep = () => {
+    const timer = performanceTimers.shift();
+    if (timer && !timer.cancelled) timer.callback();
+  };
+  return { runtime, contexts, safetyNodes, insertionTimers, performanceTimers, flushInsertions, flushPerformanceStep };
+}
+
+function sourceEnvelope(oscillator) {
+  return oscillator.connections[0].connections[0];
 }
 
 test("audio parameters can be prepared without creating application audio infrastructure", () => {
@@ -108,7 +123,7 @@ test("audio parameters can be prepared without creating application audio infras
   runtime.setLevel("channel-01", 12);
   assert.equal(contexts.length, 0);
   assert.deepEqual(runtime.getChannelSnapshot("channel-01"), {
-    channelId: "channel-01", frequency: 156, generatorType: "sine", level: 12, liveTrim: 0, effectiveLevel: 12, pan: 0, routable: true, active: false, availability: "unavailable", message: "Ready to start",
+    channelId: "channel-01", frequency: 156, generatorType: "sine", arpeggioEnabled: false, arpeggioPattern: "major", arpeggioIntervals: [0, 4, 7], arpeggioPitchCount: 3, arpeggioRateMs: 650, arpeggioDirection: "up", arpeggioCurrentFrequency: 156, arpeggioStepIndex: 0, arpeggioCycleCount: 0, arpeggioTimerActive: false, activeGeneratorVoices: 0, level: 12, liveTrim: 0, effectiveLevel: 12, pan: 0, routable: true, active: false, availability: "unavailable", message: "Ready to start",
   });
 });
 
@@ -133,7 +148,7 @@ test("Clone endpoints share one oscillator and inherited programming while retai
 
   assert.equal(contexts[0].oscillators.length, 1);
   assert.equal(runtime.getDiagnostics().sourceCreations, 1);
-  const familyGainValues = contexts[0].oscillators[0].connections[0].connections.map((gain) => gain.gain.value);
+  const familyGainValues = sourceEnvelope(contexts[0].oscillators[0]).connections.map((gain) => gain.gain.value);
   assert.equal(familyGainValues.every((value) => Math.abs(value - (0.2 * 0.2 / 3)) < 0.000001), true);
   assert.deepEqual(runtime.getActiveChannelIds(), ["channel-01", "channel-02", "channel-03"]);
   runtime.setFrequency("channel-01", 155);
@@ -159,7 +174,7 @@ test("Multi-Plot fan-out stays on one source and live movement never reconstruct
   assert.equal(contexts[0].oscillators.length, 1);
   assert.equal(graphBeforeDrag.sourceCreations, 1);
   assert.equal(graphBeforeDrag.channelCreations, 3);
-  assert.equal(oscillator.connections[0].connections.every((gain) => Math.abs(gain.gain.value - (0.2 * 0.2 / 3)) < 0.000001), true);
+  assert.equal(sourceEnvelope(oscillator).connections.every((gain) => Math.abs(gain.gain.value - (0.2 * 0.2 / 3)) < 0.000001), true);
 
   for (let index = 0; index < 120; index += 1) runtime.setSpatialX("channel-01-plot-1", -2 + index / 119 * 4, false);
   const graphAfterDrag = runtime.getDiagnostics();
@@ -181,7 +196,7 @@ test("Multi-Plot fan-out stays on one source and live movement never reconstruct
   assert.equal(runtime.getDiagnostics().activeSources, 1);
   assert.equal(runtime.getChannelSnapshot("channel-01").active, true);
   assert.equal(runtime.getChannelSnapshot("channel-01-plot-2").active, true);
-  assert.equal(oscillator.connections[0].connections.every((gain) => Math.abs(gain.gain.value - (0.2 * 0.2 / 2)) < 0.000001), true);
+  assert.equal(sourceEnvelope(oscillator).connections.every((gain) => Math.abs(gain.gain.value - (0.2 * 0.2 / 2)) < 0.000001), true);
 
   const context = runtime.getContextIdentity();
   runtime.synchronizeTopology([]);
@@ -207,8 +222,9 @@ test("a Multi-Plot added to a live source stages silently then uses a zero-slope
     { id: "channel-01-plot-1", sourceId: "channel-01" },
   ]);
 
-  const newEndpointTrim = contexts[0].gains[6].gain;
-  const existingEndpointProgrammedGain = contexts[0].gains[2].gain;
+  const endpointProgrammedGains = sourceEnvelope(contexts[0].oscillators[0]).connections;
+  const newEndpointTrim = endpointProgrammedGains[1].connections[0].gain;
+  const existingEndpointProgrammedGain = endpointProgrammedGains[0].gain;
   assert.equal(insertionTimers.at(-1).delayMs, LIVE_ENDPOINT_SETTLE_SECONDS * 1_000);
   assert.equal(newEndpointTrim.value, 0);
   assert.equal(existingEndpointProgrammedGain.value, 0.2 * 0.2);
@@ -253,7 +269,7 @@ test("rapid live additions debounce into one atomic family crossfade without tem
     { id: "channel-01-plot-2", sourceId: "channel-01" },
   ]);
 
-  const family = contexts[0].oscillators[0].connections[0].connections;
+  const family = sourceEnvelope(contexts[0].oscillators[0]).connections;
   assert.equal(insertionTimers.length, 2);
   assert.equal(insertionTimers[0].cancelled, true);
   assert.equal(insertionTimers[1].cancelled, false);
@@ -283,7 +299,7 @@ test("coherent Clone family gain remains constant through successive live insert
       topology.push({ id: `channel-01-plot-${endpointCount - 1}`, sourceId: "channel-01" });
       runtime.synchronizeTopology(topology);
     }
-    const endpointGains = contexts[0].oscillators[0].connections[0].connections.map((gain) => gain.gain.value);
+    const endpointGains = sourceEnvelope(contexts[0].oscillators[0]).connections.map((gain) => gain.gain.value);
     assert.equal(endpointGains.length, endpointCount);
     assert.equal(endpointGains.every((gain) => Math.abs(gain - baseGain / endpointCount) < 0.000001), true);
     assert.ok(Math.abs(endpointGains.reduce((sum, gain) => sum + gain, 0) - baseGain) < 0.000001);
@@ -315,20 +331,107 @@ test("Duplicate sources copy programming once then own independent oscillator st
   assert.deepEqual([runtime.getChannelSnapshot("channel-01").generatorType, runtime.getChannelSnapshot("channel-02").generatorType], ["saw", "triangle"]);
 });
 
-test("one reusable pitch instruction drives Sine, Triangle, and Saw generators", async () => {
+test("one reusable pitch instruction drives Sine, Triangle, Saw, and Square generators", async () => {
   const { runtime, contexts } = harness();
-  const channelIds = ["channel-01", "channel-02", "channel-03"];
-  const generatorTypes = ["sine", "triangle", "saw"];
+  const channelIds = ["channel-01", "channel-02", "channel-03", "channel-04"];
+  const generatorTypes = ["sine", "triangle", "saw", "square"];
   channelIds.forEach((channelId, index) => {
     runtime.setPitch(channelId, 261.6);
     runtime.setGenerator(channelId, generatorTypes[index]);
   });
   for (const channelId of channelIds) await runtime.startChannel(channelId);
 
-  assert.deepEqual(channelIds.map((channelId) => runtime.getChannelSnapshot(channelId).frequency), [262, 262, 262]);
+  assert.deepEqual(channelIds.map((channelId) => runtime.getChannelSnapshot(channelId).frequency), [262, 262, 262, 262]);
   assert.deepEqual(channelIds.map((channelId) => runtime.getChannelSnapshot(channelId).generatorType), generatorTypes);
-  assert.deepEqual(contexts[0].oscillators.map((oscillator) => oscillator.type), ["sine", "triangle", "sawtooth"]);
-  assert.deepEqual(contexts[0].oscillators.map((oscillator) => oscillator.frequency.value), [262, 262, 262]);
+  assert.deepEqual(contexts[0].oscillators.map((oscillator) => oscillator.type), ["sine", "triangle", "sawtooth", "square"]);
+  assert.deepEqual(contexts[0].oscillators.map((oscillator) => oscillator.frequency.value), [262, 262, 262, 262]);
+});
+
+test("Arpeggio owns one persistent oscillator and cycles sequential pitches with articulated transitions", async () => {
+  const { runtime, contexts, performanceTimers, flushPerformanceStep } = harness();
+  runtime.synchronizeTopology([{ id: "channel-01", sourceId: "channel-01" }]);
+  runtime.setPitch("channel-01", 220);
+  runtime.setGenerator("channel-01", "sine");
+  runtime.setArpeggioPattern("channel-01", "major");
+  runtime.setArpeggioPitchCount("channel-01", 4);
+  runtime.setArpeggioRate("channel-01", 700);
+  runtime.setArpeggioEnabled("channel-01", true);
+  await runtime.startChannel("channel-01");
+
+  const context = contexts[0];
+  const oscillator = context.oscillators[0];
+  const envelope = sourceEnvelope(oscillator);
+  assert.equal(context.oscillators.length, 1);
+  assert.equal(oscillator.type, "sine");
+  assert.equal(oscillator.frequency.value, 220);
+  assert.equal(performanceTimers[0].delayMs, 700);
+
+  flushPerformanceStep();
+  assert.equal(oscillator.frequency.value, 277);
+  assert.equal(runtime.getChannelSnapshot("channel-01").arpeggioStepIndex, 1);
+  assert.deepEqual(envelope.gain.events.slice(-3).map((event) => [event.type, event.value]), [["set", 1], ["ramp", 0], ["ramp", 1]]);
+  flushPerformanceStep();
+  assert.equal(oscillator.frequency.value, 330);
+  flushPerformanceStep();
+  assert.equal(oscillator.frequency.value, 440);
+  flushPerformanceStep();
+  assert.equal(oscillator.frequency.value, 220);
+  assert.equal(runtime.getChannelSnapshot("channel-01").arpeggioCycleCount, 1);
+  assert.equal(runtime.getDiagnostics().activeGeneratorVoices, 1);
+  assert.equal(runtime.getDiagnostics().activeArpeggioPerformers, 1);
+
+  runtime.setPitch("channel-01", 440);
+  assert.equal(oscillator.frequency.value, 440);
+  runtime.setArpeggioDirection("channel-01", "down");
+  assert.equal(oscillator.frequency.value, 880);
+  runtime.setArpeggioPattern("channel-01", "minor");
+  assert.equal(oscillator.frequency.value, 880);
+  runtime.setArpeggioRate("channel-01", 1_500);
+  assert.equal(performanceTimers.at(-1).delayMs, 1_500);
+
+  runtime.pauseSession();
+  assert.equal(runtime.getChannelSnapshot("channel-01").arpeggioTimerActive, false);
+  runtime.playSession();
+  assert.equal(runtime.getChannelSnapshot("channel-01").arpeggioTimerActive, true);
+  runtime.stopSession();
+  assert.equal(runtime.getChannelSnapshot("channel-01").arpeggioTimerActive, false);
+  assert.equal(runtime.getChannelSnapshot("channel-01").arpeggioStepIndex, 0);
+  runtime.stopChannel("channel-01");
+  assert.equal(runtime.getDiagnostics().activeGeneratorVoices, 0);
+  assert.equal(runtime.getDiagnostics().activeArpeggioPerformers, 0);
+  runtime.disposeSource("channel-01");
+  assert.equal(runtime.getDiagnostics().knownSources, 0);
+});
+
+test("Duplicate copies Arpeggio once while Multi-Plot never multiplies performer engines", async () => {
+  const { runtime } = harness();
+  runtime.synchronizeTopology([
+    { id: "channel-01", sourceId: "channel-01" },
+    { id: "channel-02", sourceId: "channel-02" },
+  ]);
+  runtime.setArpeggioPattern("channel-01", "fifths");
+  runtime.setArpeggioPitchCount("channel-01", 3);
+  runtime.setArpeggioRate("channel-01", 900);
+  runtime.setArpeggioDirection("channel-01", "up-down");
+  runtime.setArpeggioEnabled("channel-01", true);
+  runtime.copyProgramming("channel-01", "channel-02");
+  await runtime.startChannel("channel-01");
+  await runtime.startChannel("channel-02");
+  assert.equal(runtime.getDiagnostics().activeGeneratorVoices, 2);
+  assert.equal(runtime.getDiagnostics().activeArpeggioPerformers, 2);
+
+  runtime.synchronizeTopology([
+    { id: "channel-01", sourceId: "channel-01" },
+    { id: "channel-01-plot-1", sourceId: "channel-01" },
+    { id: "channel-02", sourceId: "channel-02" },
+  ]);
+  assert.equal(runtime.getDiagnostics().activeGeneratorVoices, 2);
+  assert.equal(runtime.getDiagnostics().activeArpeggioPerformers, 2);
+  runtime.setArpeggioPattern("channel-01", "minor");
+  runtime.setArpeggioRate("channel-01", 1_200);
+  assert.equal(runtime.getChannelSnapshot("channel-01-plot-1").arpeggioPattern, "minor");
+  assert.equal(runtime.getChannelSnapshot("channel-02").arpeggioPattern, "fifths");
+  assert.equal(runtime.getChannelSnapshot("channel-02").arpeggioRateMs, 900);
 });
 
 test("five channels coexist through one context and master with isolated parameters and source lifecycles", async () => {
@@ -354,6 +457,13 @@ test("five channels coexist through one context and master with isolated paramet
     sourceCreations: 5,
     sourceDisposals: 0,
     activeSources: 5,
+    generatorVoiceCreations: 5,
+    generatorVoiceDisposals: 0,
+    activeGeneratorVoices: 5,
+    activeArpeggioPerformers: 0,
+    arpeggioStepEvents: 0,
+    arpeggioTimerCreations: 0,
+    arpeggioTimerCancellations: 0,
     safetyCreations: 1,
     safetyDisposals: 0,
     finalAnalyserCreations: 1,
@@ -363,7 +473,7 @@ test("five channels coexist through one context and master with isolated paramet
     safetyListeners: 0,
   });
   assert.deepEqual(channelIds.map((channelId) => runtime.getChannelSnapshot(channelId).frequency), [78, 110, 156, 221, 312]);
-  assert.equal(contexts[0].oscillators[0].connections[0], contexts[0].gains[4]);
+  assert.equal(sourceEnvelope(contexts[0].oscillators[0]), contexts[0].gains[4]);
   assert.equal(contexts[0].gains[4].connections[0], contexts[0].gains[2]);
   assert.equal(contexts[0].gains[2].connections[0], contexts[0].gains[3]);
   assert.equal(contexts[0].gains[3].connections[0], contexts[0].analysers[1]);
@@ -702,7 +812,7 @@ test("initialisation failure is visible and retryable without affecting unrelate
   }, async () => new FakeSafetyNode());
   await runtime.startChannel("channel-01");
   assert.deepEqual(runtime.getChannelSnapshot("channel-01"), {
-    channelId: "channel-01", frequency: AUDIO_DEFAULT_FREQUENCY, generatorType: "sine", level: AUDIO_DEFAULT_LEVEL, liveTrim: 0, effectiveLevel: AUDIO_DEFAULT_LEVEL, pan: 0, routable: true, active: false, availability: "error", message: "Audio device unavailable",
+    channelId: "channel-01", frequency: AUDIO_DEFAULT_FREQUENCY, generatorType: "sine", arpeggioEnabled: false, arpeggioPattern: "major", arpeggioIntervals: [0, 4, 7], arpeggioPitchCount: 3, arpeggioRateMs: 650, arpeggioDirection: "up", arpeggioCurrentFrequency: AUDIO_DEFAULT_FREQUENCY, arpeggioStepIndex: 0, arpeggioCycleCount: 0, arpeggioTimerActive: false, activeGeneratorVoices: 0, level: AUDIO_DEFAULT_LEVEL, liveTrim: 0, effectiveLevel: AUDIO_DEFAULT_LEVEL, pan: 0, routable: true, active: false, availability: "error", message: "Audio device unavailable",
   });
   await runtime.startChannel("channel-01");
   assert.equal(runtime.getChannelSnapshot("channel-01").active, true);

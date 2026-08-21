@@ -32,6 +32,8 @@ pnpm test
 - Editable timing and injection controls
 - Dynamic add/remove channel test-bed with scroll-contained large populations
 - Dynamic isolated sine sources with independent frequency, exact 1 Hz tuning, compact level and Start/Stop controls
+- Optional persistent Arpeggio traversal with bounded harmonic patterns, 2–6 pitches, live rate and direction controls
+- Sine, Triangle, Saw and Square generators through one shared pitch/Arpeggio contract, with one oscillator per performer
 - Place transfers a sine player into Threads as one channel-bound output-only source node for explicit Channel Out wiring
 - Channel Out disconnection smoothly silences only that channel while preserving its source and programmed state
 - Sound Desk X-axis stereo placement and bounded relative Live Trim per plotted channel
@@ -50,9 +52,11 @@ pnpm test
 
 ## Milestone boundaries
 
-The approved repository baseline is now Milestone 13 on `milestone/ui-interaction-harness`. M11 remains recoverable at `a54e9599e10080a8ad4b325ec78c316faf2f48fd` and M09 at `9af3b8d5d64f8a1bdfbb34f01828c2003a24b314`.
+The approved repository baseline is now Milestone 14, with promotion to `milestone/ui-interaction-harness` authorised on 2026-08-21. M13 remains recoverable at `848457367c2b60a91f0e85bf7f03d7a43ade92c4`, M11 at `a54e9599e10080a8ad4b325ec78c316faf2f48fd`, and M09 at `9af3b8d5d64f8a1bdfbb34f01828c2003a24b314`.
 
 The M12–M13 batch moves shared-source spatial fan-out into Sound Desk Multi-Plot, adds Sine/Triangle/Saw through one pitch architecture, introduces recording-safe debounced family delivery, explicit endpoint/source tallies, draggable Plot Point Folders, and quick individual pull-free routing. Duplicate remains an independent source. The accepted listening configuration remains `?audioDiagnostic=native-fence-scope`; its native fence is not a true-peak or acoustic-SPL guarantee.
+
+Milestone 14 was user-approved for GitHub promotion on 2026-08-21. It adds a visible downstream Arpeggio performer and Square without changing qualified Multi-Plot or output-safety ownership. Arpeggio continuously traverses one related pitch at a time; it is not simultaneous Chord playback. Microtonal traversal, Noise and Filter remain deferred; later milestone scope belongs to a fresh context and explicit brief.
 
 ## Main editing surfaces
 
