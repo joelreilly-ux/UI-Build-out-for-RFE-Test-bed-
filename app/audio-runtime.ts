@@ -3,13 +3,22 @@ import type { ThreadChannel } from "./channel-routing";
 import { diagnosticMeterEnabled, getAudioDiagnosticMode } from "./audio-diagnostics.ts";
 import {
   DEFAULT_PITCH_FREQUENCY,
+  DEFAULT_ARPEGGIO_RATE_MS,
   PITCH_FREQUENCY_MAX,
   PITCH_FREQUENCY_MIN,
+  createArpeggioInstruction,
   createPitchInstruction,
+  getArpeggioIntervals,
+  getArpeggioPitch,
   generatorLabel,
+  normalizeArpeggioDirection,
+  normalizeArpeggioPattern,
   normalizePitchedGeneratorType,
   oscillatorTypeForGenerator,
   type PitchInstruction,
+  type ArpeggioDirection,
+  type ArpeggioInstruction,
+  type ArpeggioPattern,
   type PitchedGeneratorType,
 } from "./musical-source.ts";
 
@@ -22,6 +31,8 @@ export const LIVE_TRIM_MAX = 16;
 const CHANNEL_GAIN_MAX = 0.2;
 const MASTER_GAIN = 0.8;
 export const LIVE_AUDIO_RAMP_SECONDS = 0.02;
+export const ARPEGGIO_RELEASE_SECONDS = 0.018;
+export const ARPEGGIO_ATTACK_SECONDS = 0.032;
 export const LIVE_ENDPOINT_FADE_SECONDS = 0.25;
 export const LIVE_ENDPOINT_SETTLE_SECONDS = 1;
 export const OUTPUT_SAFETY_CEILING_DBFS = -6;
@@ -34,6 +45,17 @@ export type AudioChannelSnapshot = Readonly<{
   channelId: ChannelId;
   frequency: number;
   generatorType: PitchedGeneratorType;
+  arpeggioEnabled: boolean;
+  arpeggioPattern: ArpeggioPattern;
+  arpeggioIntervals: readonly number[];
+  arpeggioPitchCount: number;
+  arpeggioRateMs: number;
+  arpeggioDirection: ArpeggioDirection;
+  arpeggioCurrentFrequency: number;
+  arpeggioStepIndex: number;
+  arpeggioCycleCount: number;
+  arpeggioTimerActive: boolean;
+  activeGeneratorVoices: number;
   level: number;
   liveTrim: number;
   effectiveLevel: number;
@@ -60,6 +82,13 @@ export type AudioRuntimeDiagnostics = Readonly<{
   sourceCreations: number;
   sourceDisposals: number;
   activeSources: number;
+  generatorVoiceCreations: number;
+  generatorVoiceDisposals: number;
+  activeGeneratorVoices: number;
+  activeArpeggioPerformers: number;
+  arpeggioStepEvents: number;
+  arpeggioTimerCreations: number;
+  arpeggioTimerCancellations: number;
   safetyCreations: number;
   safetyDisposals: number;
   finalAnalyserCreations: number;
@@ -133,6 +162,9 @@ export type SafetyNodeFactory = (context: AudioContextLike) => Promise<SafetyNod
 type InsertionTimer = ReturnType<typeof setTimeout>;
 type InsertionScheduler = (callback: () => void, delayMs: number) => InsertionTimer;
 type InsertionCanceller = (timer: InsertionTimer) => void;
+type PerformanceTimer = ReturnType<typeof setTimeout>;
+type PerformanceScheduler = (callback: () => void, delayMs: number) => PerformanceTimer;
+type PerformanceCanceller = (timer: PerformanceTimer) => void;
 
 type ChannelAudioInstance = {
   id: ChannelId;
@@ -157,11 +189,26 @@ type ChannelAudioInstance = {
 type SourceAudioInstance = {
   id: ChannelId;
   source: OscillatorNodeLike | null;
+  voices: Array<{ oscillator: OscillatorNodeLike; gain: GainNodeLike; interval: number }>;
   envelope: GainNodeLike | null;
   pitch: PitchInstruction;
+  arpeggio: ArpeggioInstruction;
+  arpeggioStepIndex: number;
+  arpeggioCycleCount: number;
+  arpeggioTimer: PerformanceTimer | null;
   generatorType: PitchedGeneratorType;
   level: number;
   active: boolean;
+};
+
+type SourceConfiguration = {
+  pitch: PitchInstruction;
+  arpeggio: ArpeggioInstruction;
+  generatorType: PitchedGeneratorType;
+  level: number;
+  liveTrim: number;
+  pan: number;
+  routable: boolean;
 };
 
 function clamp(value: number, minimum: number, maximum: number) {
@@ -262,6 +309,8 @@ export class ApplicationAudioRuntime {
   private readonly createSafetyNode: SafetyNodeFactory;
   private readonly scheduleInsertion: InsertionScheduler;
   private readonly cancelInsertion: InsertionCanceller;
+  private readonly schedulePerformance: PerformanceScheduler;
+  private readonly cancelPerformance: PerformanceCanceller;
   private context: AudioContextLike | null = null;
   private master: GainNodeLike | null = null;
   private sessionGate: GainNodeLike | null = null;
@@ -272,7 +321,7 @@ export class ApplicationAudioRuntime {
   private channels = new Map<ChannelId, ChannelAudioInstance>();
   private sources = new Map<ChannelId, SourceAudioInstance>();
   private sourceIds = new Map<ChannelId, ChannelId>();
-  private configurations = new Map<ChannelId, { pitch: PitchInstruction; generatorType: PitchedGeneratorType; level: number; liveTrim: number; pan: number; routable: boolean }>();
+  private configurations = new Map<ChannelId, SourceConfiguration>();
   private failures = new Map<ChannelId, string>();
   private listeners = new Set<() => void>();
   private masterSafetyListeners = new Set<() => void>();
@@ -306,6 +355,13 @@ export class ApplicationAudioRuntime {
     sourceCreations: 0,
     sourceDisposals: 0,
     activeSources: 0,
+    generatorVoiceCreations: 0,
+    generatorVoiceDisposals: 0,
+    activeGeneratorVoices: 0,
+    activeArpeggioPerformers: 0,
+    arpeggioStepEvents: 0,
+    arpeggioTimerCreations: 0,
+    arpeggioTimerCancellations: 0,
     safetyCreations: 0,
     safetyDisposals: 0,
     finalAnalyserCreations: 0,
@@ -320,11 +376,15 @@ export class ApplicationAudioRuntime {
     createSafetyNode: SafetyNodeFactory = browserSafetyNodeFactory,
     scheduleInsertion: InsertionScheduler = (callback, delayMs) => setTimeout(callback, delayMs),
     cancelInsertion: InsertionCanceller = (timer) => clearTimeout(timer),
+    schedulePerformance: PerformanceScheduler = (callback, delayMs) => setTimeout(callback, delayMs),
+    cancelPerformance: PerformanceCanceller = (timer) => clearTimeout(timer),
   ) {
     this.createContext = createContext;
     this.createSafetyNode = createSafetyNode;
     this.scheduleInsertion = scheduleInsertion;
     this.cancelInsertion = cancelInsertion;
+    this.schedulePerformance = schedulePerformance;
+    this.cancelPerformance = cancelPerformance;
   }
 
   subscribe = (listener: () => void) => {
@@ -342,10 +402,27 @@ export class ApplicationAudioRuntime {
     const sourceId = this.getSourceId(channelId);
     const source = this.sources.get(sourceId);
     const sourceConfiguration = this.configurations.get(sourceId);
+    const pitch = source?.pitch ?? sourceConfiguration?.pitch ?? createPitchInstruction(getDefaultChannelFrequency(sourceId));
+    const arpeggio = source?.arpeggio ?? sourceConfiguration?.arpeggio ?? createArpeggioInstruction();
+    const arpeggioStepIndex = source?.arpeggioStepIndex ?? 0;
+    const arpeggioFields = {
+      arpeggioEnabled: arpeggio.enabled,
+      arpeggioPattern: arpeggio.pattern,
+      arpeggioIntervals: getArpeggioIntervals(arpeggio),
+      arpeggioPitchCount: arpeggio.pitchCount,
+      arpeggioRateMs: arpeggio.rateMs,
+      arpeggioDirection: arpeggio.direction,
+      arpeggioCurrentFrequency: getArpeggioPitch(pitch, arpeggio, arpeggioStepIndex).frequencyHz,
+      arpeggioStepIndex,
+      arpeggioCycleCount: source?.arpeggioCycleCount ?? 0,
+      arpeggioTimerActive: Boolean(source?.arpeggioTimer),
+    };
     return channel ? {
       channelId,
-      frequency: source?.pitch.frequencyHz ?? sourceConfiguration?.pitch.frequencyHz ?? channel.pitch.frequencyHz,
+      frequency: pitch.frequencyHz,
       generatorType: source?.generatorType ?? sourceConfiguration?.generatorType ?? channel.generatorType,
+      ...arpeggioFields,
+      activeGeneratorVoices: source?.active ? source.voices.length : 0,
       level: source?.level ?? sourceConfiguration?.level ?? channel.level,
       liveTrim: channel.liveTrim,
       effectiveLevel: channel.routable ? channel.level * liveTrimMultiplier(channel.liveTrim) : 0,
@@ -356,8 +433,10 @@ export class ApplicationAudioRuntime {
       message: channel.message,
     } : {
       channelId,
-      frequency: source?.pitch.frequencyHz ?? sourceConfiguration?.pitch.frequencyHz ?? getDefaultChannelFrequency(sourceId),
+      frequency: pitch.frequencyHz,
       generatorType: source?.generatorType ?? sourceConfiguration?.generatorType ?? "sine",
+      ...arpeggioFields,
+      activeGeneratorVoices: source?.active ? source.voices.length : 0,
       level: source?.level ?? sourceConfiguration?.level ?? AUDIO_DEFAULT_LEVEL,
       liveTrim: this.configurations.get(channelId)?.liveTrim ?? 0,
       effectiveLevel: (this.configurations.get(channelId)?.routable ?? true) ? (this.configurations.get(channelId)?.level ?? AUDIO_DEFAULT_LEVEL) * liveTrimMultiplier(this.configurations.get(channelId)?.liveTrim ?? 0) : 0,
@@ -455,25 +534,43 @@ export class ApplicationAudioRuntime {
       if (this.context!.state === "suspended") await this.context!.resume();
       this.sourceIds.forEach((mappedSourceId, endpointId) => { if (mappedSourceId === sourceId) this.ensureChannel(endpointId); });
 
-      const source = this.context!.createOscillator();
       const envelope = this.context!.createGain();
       const programming = this.getOrCreateConfiguration(sourceId);
-      source.type = oscillatorTypeForGenerator(programming.generatorType);
-      source.frequency.setValueAtTime(programming.pitch.frequencyHz, this.context!.currentTime);
       envelope.gain.setValueAtTime(0, this.context!.currentTime);
-      source.connect(envelope);
+      const oscillator = this.context!.createOscillator();
+      const voiceGain = this.context!.createGain();
+      const initialPitch = getArpeggioPitch(programming.pitch, programming.arpeggio, 0);
+      oscillator.type = oscillatorTypeForGenerator(programming.generatorType);
+      oscillator.frequency.setValueAtTime(initialPitch.frequencyHz, this.context!.currentTime);
+      voiceGain.gain.setValueAtTime(1, this.context!.currentTime);
+      oscillator.connect(voiceGain);
+      voiceGain.connect(envelope);
+      oscillator.onended = () => {
+        oscillator.disconnect();
+        voiceGain.disconnect();
+        envelope.disconnect();
+        this.diagnostics = {
+          ...this.diagnostics,
+          generatorVoiceDisposals: this.diagnostics.generatorVoiceDisposals + 1,
+          sourceDisposals: this.diagnostics.sourceDisposals + 1,
+        };
+      };
+      oscillator.start();
+      const voices = [{ oscillator, gain: voiceGain, interval: getArpeggioIntervals(programming.arpeggio)[0] ?? 0 }];
       this.channels.forEach((endpoint) => { if (endpoint.sourceId === sourceId) envelope.connect(endpoint.gain); });
       this.smooth(envelope.gain, 1);
-      source.onended = () => {
-        source.disconnect();
-        envelope.disconnect();
-        this.diagnostics = { ...this.diagnostics, sourceDisposals: this.diagnostics.sourceDisposals + 1 };
-      };
-      source.start();
-      this.sources.set(sourceId, { id: sourceId, source, envelope, pitch: programming.pitch, generatorType: programming.generatorType, level: programming.level, active: true });
+      this.sources.set(sourceId, { id: sourceId, source: oscillator, voices, envelope, pitch: programming.pitch, arpeggio: programming.arpeggio, arpeggioStepIndex: 0, arpeggioCycleCount: 0, arpeggioTimer: null, generatorType: programming.generatorType, level: programming.level, active: true });
+      if (programming.arpeggio.enabled && this.sessionPlaybackState === "playing") this.scheduleArpeggioStep(sourceId);
       this.channels.forEach((endpoint) => { if (endpoint.sourceId === sourceId) { endpoint.active = true; endpoint.availability = "active"; endpoint.message = `Shared ${generatorLabel(programming.generatorType).toLowerCase()} signal active`; } });
       this.failures.delete(sourceId);
-      this.diagnostics = { ...this.diagnostics, sourceCreations: this.diagnostics.sourceCreations + 1, activeSources: this.diagnostics.activeSources + 1 };
+      this.diagnostics = {
+        ...this.diagnostics,
+        sourceCreations: this.diagnostics.sourceCreations + 1,
+        activeSources: this.diagnostics.activeSources + 1,
+        generatorVoiceCreations: this.diagnostics.generatorVoiceCreations + 1,
+        activeGeneratorVoices: this.diagnostics.activeGeneratorVoices + 1,
+        activeArpeggioPerformers: this.diagnostics.activeArpeggioPerformers + (programming.arpeggio.enabled ? 1 : 0),
+      };
       this.emit();
     } catch (error) {
       const channel = this.channels.get(channelId);
@@ -490,15 +587,22 @@ export class ApplicationAudioRuntime {
     const sourceId = this.getSourceId(channelId);
     const sourceState = this.sources.get(sourceId);
     if (!sourceState?.source || !this.context) return;
-    const source = sourceState.source;
+    const voices = [...sourceState.voices];
+    this.cancelArpeggioTimer(sourceState);
     const envelope = sourceState.envelope;
     if (envelope) this.smooth(envelope.gain, 0);
-    source.stop(this.context.currentTime + LIVE_AUDIO_RAMP_SECONDS);
+    voices.forEach((voice) => voice.oscillator.stop(this.context!.currentTime + LIVE_AUDIO_RAMP_SECONDS));
     sourceState.source = null;
+    sourceState.voices = [];
     sourceState.envelope = null;
     sourceState.active = false;
     this.channels.forEach((endpoint) => { if (endpoint.sourceId === sourceId) { endpoint.active = false; endpoint.availability = "stopped"; endpoint.message = "Signal stopped at source"; } });
-    this.diagnostics = { ...this.diagnostics, activeSources: Math.max(0, this.diagnostics.activeSources - 1) };
+    this.diagnostics = {
+      ...this.diagnostics,
+      activeSources: Math.max(0, this.diagnostics.activeSources - 1),
+      activeGeneratorVoices: Math.max(0, this.diagnostics.activeGeneratorVoices - voices.length),
+      activeArpeggioPerformers: Math.max(0, this.diagnostics.activeArpeggioPerformers - (sourceState.arpeggio.enabled ? 1 : 0)),
+    };
     this.emit();
   }
 
@@ -518,7 +622,7 @@ export class ApplicationAudioRuntime {
     channel.pitch = pitch;
     const source = this.sources.get(channelId);
     if (source) source.pitch = pitch;
-    if (source?.source && this.context) this.smooth(source.source.frequency, pitch.frequencyHz);
+    if (source?.active && this.context) this.updateArpeggioPitch(channelId, false);
     this.emit();
   }
 
@@ -535,13 +639,60 @@ export class ApplicationAudioRuntime {
     const source = this.sources.get(channelId);
     if (source) {
       source.generatorType = safeGeneratorType;
-      if (source.source) source.source.type = oscillatorTypeForGenerator(safeGeneratorType);
+      source.voices.forEach((voice) => { voice.oscillator.type = oscillatorTypeForGenerator(safeGeneratorType); });
     }
     this.channels.forEach((endpoint) => {
       if (endpoint.sourceId !== channelId) return;
       endpoint.generatorType = safeGeneratorType;
       endpoint.message = source?.active ? `Shared ${generatorLabel(safeGeneratorType).toLowerCase()} signal active` : "Ready to start";
     });
+    this.emit();
+  }
+
+  setArpeggioEnabled(channelId: ChannelId, enabled: boolean) {
+    channelId = this.getSourceId(channelId);
+    const configuration = this.getOrCreateConfiguration(channelId);
+    const arpeggio = createArpeggioInstruction({ ...configuration.arpeggio, enabled });
+    if (configuration.arpeggio.enabled === arpeggio.enabled) return;
+    this.configurations.set(channelId, { ...configuration, arpeggio });
+    const source = this.sources.get(channelId);
+    if (source) {
+      const wasEnabled = source.arpeggio.enabled;
+      source.arpeggio = arpeggio;
+      source.arpeggioStepIndex = 0;
+      source.arpeggioCycleCount = 0;
+      this.cancelArpeggioTimer(source);
+      if (source.active && this.context) {
+        this.updateArpeggioPitch(channelId, true);
+        if (arpeggio.enabled && this.sessionPlaybackState === "playing") this.scheduleArpeggioStep(channelId);
+      }
+      if (source.active && wasEnabled !== arpeggio.enabled) this.diagnostics = { ...this.diagnostics, activeArpeggioPerformers: Math.max(0, this.diagnostics.activeArpeggioPerformers + (arpeggio.enabled ? 1 : -1)) };
+    }
+    this.emit();
+  }
+
+  setArpeggioPattern(channelId: ChannelId, pattern: ArpeggioPattern) {
+    channelId = this.getSourceId(channelId);
+    const configuration = this.getOrCreateConfiguration(channelId);
+    this.updateArpeggioInstruction(channelId, createArpeggioInstruction({ ...configuration.arpeggio, pattern: normalizeArpeggioPattern(pattern, configuration.arpeggio.pattern) }));
+  }
+
+  setArpeggioPitchCount(channelId: ChannelId, pitchCount: number) {
+    channelId = this.getSourceId(channelId);
+    const configuration = this.getOrCreateConfiguration(channelId);
+    this.updateArpeggioInstruction(channelId, createArpeggioInstruction({ ...configuration.arpeggio, pitchCount }));
+  }
+
+  setArpeggioRate(channelId: ChannelId, rateMs: number) {
+    channelId = this.getSourceId(channelId);
+    const configuration = this.getOrCreateConfiguration(channelId);
+    this.updateArpeggioInstruction(channelId, createArpeggioInstruction({ ...configuration.arpeggio, rateMs }));
+  }
+
+  setArpeggioDirection(channelId: ChannelId, direction: ArpeggioDirection) {
+    channelId = this.getSourceId(channelId);
+    const configuration = this.getOrCreateConfiguration(channelId);
+    this.updateArpeggioInstruction(channelId, createArpeggioInstruction({ ...configuration.arpeggio, direction: normalizeArpeggioDirection(direction, configuration.arpeggio.direction) }));
     this.emit();
   }
 
@@ -606,18 +757,21 @@ export class ApplicationAudioRuntime {
   playSession() {
     this.sessionPlaybackState = "playing";
     if (this.sessionGate && this.context) this.smooth(this.sessionGate.gain, 1);
+    this.sources.forEach((source) => { if (source.active && source.arpeggio.enabled && !source.arpeggioTimer) this.scheduleArpeggioStep(source.id); });
     this.emit();
   }
 
   pauseSession() {
     this.sessionPlaybackState = "paused";
     if (this.sessionGate && this.context) this.smooth(this.sessionGate.gain, 0);
+    this.sources.forEach((source) => this.cancelArpeggioTimer(source));
     this.emit();
   }
 
   stopSession() {
     this.sessionPlaybackState = "stopped";
     if (this.sessionGate && this.context) this.smooth(this.sessionGate.gain, 0);
+    this.sources.forEach((source) => { this.cancelArpeggioTimer(source); source.arpeggioStepIndex = 0; source.arpeggioCycleCount = 0; this.updateArpeggioPitch(source.id, false); });
     this.emit();
   }
 
@@ -688,6 +842,11 @@ export class ApplicationAudioRuntime {
     this.setPitch(toChannelId, snapshot.frequency);
     this.setGenerator(toChannelId, snapshot.generatorType);
     this.setLevel(toChannelId, snapshot.level);
+    this.setArpeggioPattern(toChannelId, snapshot.arpeggioPattern);
+    this.setArpeggioPitchCount(toChannelId, snapshot.arpeggioPitchCount);
+    this.setArpeggioRate(toChannelId, snapshot.arpeggioRateMs);
+    this.setArpeggioDirection(toChannelId, snapshot.arpeggioDirection);
+    this.setArpeggioEnabled(toChannelId, snapshot.arpeggioEnabled);
   }
 
   async shutdownApplication() {
@@ -808,8 +967,72 @@ export class ApplicationAudioRuntime {
     return channel;
   }
 
+  private updateArpeggioInstruction(sourceId: ChannelId, arpeggio: ArpeggioInstruction) {
+    const configuration = this.getOrCreateConfiguration(sourceId);
+    this.configurations.set(sourceId, { ...configuration, arpeggio });
+    const source = this.sources.get(sourceId);
+    if (!source) { this.emit(); return; }
+    source.arpeggio = arpeggio;
+    source.arpeggioStepIndex = 0;
+    source.arpeggioCycleCount = 0;
+    this.cancelArpeggioTimer(source);
+    if (source.active && this.context) {
+      this.updateArpeggioPitch(sourceId, arpeggio.enabled);
+      if (arpeggio.enabled && this.sessionPlaybackState === "playing") this.scheduleArpeggioStep(sourceId);
+    }
+    this.emit();
+  }
+
+  private cancelArpeggioTimer(source: SourceAudioInstance) {
+    if (source.arpeggioTimer === null) return;
+    this.cancelPerformance(source.arpeggioTimer);
+    source.arpeggioTimer = null;
+    this.diagnostics = { ...this.diagnostics, arpeggioTimerCancellations: this.diagnostics.arpeggioTimerCancellations + 1 };
+  }
+
+  private scheduleArpeggioStep(sourceId: ChannelId) {
+    const source = this.sources.get(sourceId);
+    if (!source?.active || !source.arpeggio.enabled || source.arpeggioTimer !== null || this.sessionPlaybackState !== "playing") return;
+    source.arpeggioTimer = this.schedulePerformance(() => {
+      source.arpeggioTimer = null;
+      const current = this.sources.get(sourceId);
+      if (!current?.active || !current.arpeggio.enabled || this.sessionPlaybackState !== "playing") return;
+      const sequenceLength = getArpeggioIntervals(current.arpeggio).length;
+      current.arpeggioStepIndex = (current.arpeggioStepIndex + 1) % sequenceLength;
+      if (current.arpeggioStepIndex === 0) current.arpeggioCycleCount += 1;
+      this.updateArpeggioPitch(sourceId, true);
+      this.scheduleArpeggioStep(sourceId);
+      this.emit();
+    }, source.arpeggio.rateMs);
+    this.diagnostics = { ...this.diagnostics, arpeggioTimerCreations: this.diagnostics.arpeggioTimerCreations + 1 };
+  }
+
+  private updateArpeggioPitch(sourceId: ChannelId, articulate: boolean) {
+    const source = this.sources.get(sourceId);
+    const voice = source?.voices[0];
+    if (!source?.active || !voice || !source.envelope || !this.context) return;
+    const intervals = getArpeggioIntervals(source.arpeggio);
+    voice.interval = source.arpeggio.enabled ? intervals[source.arpeggioStepIndex % intervals.length] ?? 0 : 0;
+    const pitch = getArpeggioPitch(source.pitch, source.arpeggio, source.arpeggioStepIndex);
+    if (!articulate) {
+      this.smooth(voice.oscillator.frequency, pitch.frequencyHz);
+      return;
+    }
+    const now = this.context.currentTime;
+    const switchTime = now + ARPEGGIO_RELEASE_SECONDS;
+    const envelope = source.envelope.gain;
+    envelope.cancelScheduledValues(now);
+    envelope.setValueAtTime(finiteNumber(envelope.value, 1), now);
+    envelope.linearRampToValueAtTime(0, switchTime);
+    envelope.linearRampToValueAtTime(1, switchTime + ARPEGGIO_ATTACK_SECONDS);
+    voice.oscillator.frequency.cancelScheduledValues(now);
+    voice.oscillator.frequency.setValueAtTime(finiteNumber(voice.oscillator.frequency.value, pitch.frequencyHz), now);
+    voice.oscillator.frequency.linearRampToValueAtTime(pitch.frequencyHz, switchTime);
+    this.diagnostics = { ...this.diagnostics, smoothingRamps: this.diagnostics.smoothingRamps + 3, arpeggioStepEvents: this.diagnostics.arpeggioStepEvents + 1 };
+  }
+
   private getOrCreateConfiguration(channelId: ChannelId) {
-    const configuration = this.configurations.get(channelId) ?? { pitch: createPitchInstruction(getDefaultChannelFrequency(channelId)), generatorType: "sine" as const, level: AUDIO_DEFAULT_LEVEL, liveTrim: 0, pan: 0, routable: true };
+    const configuration = this.configurations.get(channelId) ?? { pitch: createPitchInstruction(getDefaultChannelFrequency(channelId)), arpeggio: createArpeggioInstruction({ enabled: false, rateMs: DEFAULT_ARPEGGIO_RATE_MS }), generatorType: "sine" as const, level: AUDIO_DEFAULT_LEVEL, liveTrim: 0, pan: 0, routable: true };
     this.configurations.set(channelId, configuration);
     return configuration;
   }

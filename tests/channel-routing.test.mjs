@@ -21,6 +21,34 @@ test("placing a source visibly takes ownership of its legacy placeholder output 
   assert.match(placed.statusMessage, /placed and routed/i);
 });
 
+test("a source-bound Arpeggio is a real canvas processor and duplicates independently", () => {
+  let state = appReducer(createInitialState(), { type: "select-channel", channelId: "channel-01" });
+  state = appReducer(state, { type: "add-module", moduleType: "square-generator", channelId: "channel-01" });
+  const source = state.modules.find((module) => module.type === "pitched-generator" && module.audioChannelId === "channel-01");
+  assert.ok(source);
+
+  state = appReducer(state, { type: "add-module", moduleType: "arpeggio-processor", channelId: "channel-01" });
+  const arpeggio = state.modules.find((module) => module.type === "arpeggio-processor" && module.audioChannelId === "channel-01");
+  assert.ok(arpeggio);
+  assert.equal(state.connections.some((connection) => connection.fromModuleId === source.id && connection.toModuleId === arpeggio.id), true);
+  assert.equal(state.channelTerminalConnections.find((connection) => connection.channelId === "channel-01").fromModuleId, arpeggio.id);
+  assert.deepEqual(state.selection, { kind: "module", id: arpeggio.id });
+
+  state = appReducer(state, { type: "duplicate-source", sourceChannelId: "channel-01" });
+  const duplicateChannel = state.threadChannels.find((channel) => channel.role === "duplicate");
+  const duplicateSource = state.modules.find((module) => module.type === "pitched-generator" && module.audioChannelId === duplicateChannel?.id);
+  const duplicateArpeggio = state.modules.find((module) => module.type === "arpeggio-processor" && module.audioChannelId === duplicateChannel?.id);
+  assert.ok(duplicateSource);
+  assert.ok(duplicateArpeggio);
+  assert.notEqual(duplicateArpeggio.id, arpeggio.id);
+  assert.equal(state.connections.some((connection) => connection.fromModuleId === duplicateSource.id && connection.toModuleId === duplicateArpeggio.id), true);
+
+  state = appReducer(state, { type: "remove-source-arpeggio", sourceChannelId: "channel-01" });
+  assert.equal(state.modules.some((module) => module.id === arpeggio.id), false);
+  assert.equal(state.channelTerminalConnections.find((connection) => connection.channelId === "channel-01").fromModuleId, source.id);
+  assert.equal(state.modules.some((module) => module.id === duplicateArpeggio.id), true);
+});
+
 test("dynamic channels follow the highest active identity with no five-channel ceiling", () => {
   let state = createInitialState();
   for (let index = 0; index < 7; index += 1) state = appReducer(state, { type: "add-channel" });
@@ -127,7 +155,7 @@ test("deleting a terminal source makes only its stable channel incomplete", () =
   state = appReducer(state, { type: "add-channel" });
   state = appReducer(state, { type: "begin-connection", fromModuleId: "attack" });
   state = appReducer(state, { type: "commit-channel-output", channelId: "channel-02" });
-  state = appReducer(state, { type: "select-module", id: "chord" });
+  state = appReducer(state, { type: "select-module", id: "pattern" });
   state = appReducer(state, { type: "delete-selection" });
   assert.equal(getIncomingChannels(state).find((channel) => channel.id === "channel-01").status, "incomplete");
   assert.equal(getIncomingChannels(state).find((channel) => channel.id === "channel-02").status, "complete");

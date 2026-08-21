@@ -3,20 +3,21 @@ RFE PROTOTYPE TEST-BED — PROJECT HANDOVER
 1. PROJECT STATE
 
 State:
-- APPROVED THROUGH: Milestone 13 (M12–M13 hard-save publication authorised 2026-08-15).
-- QUALIFIED BATCH: M10 / M10.1 / M11 / M12 / M13, including accepted browser-regression remediation and diagnostic history.
+- APPROVED THROUGH: Milestone 14. User musical acceptance and GitHub publication were explicitly authorised on 2026-08-21.
+- PROMOTION BATCH: Milestone 14 persistent Arpeggio architecture plus Square generator on `agent/milestone-14`, ready for the authorised GitHub hard save.
+- QUALIFIED BATCH: M10 / M10.1 / M11 / M12 / M13 / M14, including accepted browser-regression remediation and diagnostic history.
 - Authoritative branch: `milestone/ui-interaction-harness`.
 - Qualified M12–M13 implementation commit: `3be2f6e9f94b6946facefc60825559fcefb56b87`; GitHub merge commit: `cec46def328b8341f87222b84ffc903eac1fb7bc`.
 - Previous approved M09: `9af3b8d5d64f8a1bdfbb34f01828c2003a24b314`, preserved in ancestry.
 - Historical review branch: `review/m10-safety-audit` at the qualified implementation commit; it is review evidence, not development authority.
-- Current development phase: M13 musical-source architecture, generator expansion, recording-safe Multi-Plot delivery, and cluster workflow are user-accepted on `agent/milestone-13` and authorised for promotion to the authoritative branch.
-- Handover updated: 2026-08-15 (Europe/London).
+- Current development phase: M14 adds an optional downstream persistent Arpeggio with 2–6 sequential pitches, bounded rate/pattern/direction controls, one oscillator per performer, explicit scheduler diagnostics and Square through the pitched-generator contract. The superseded simultaneous Chord implementation was removed cleanly. Microtonal stepping, Noise and Filter remain deferred.
+- Handover updated: 2026-08-21 (Europe/London).
 
 Product/runtime authority:
 - PRIMARY PRODUCT TARGET: one locally launchable offline desktop RFE Test Engine.
 - SECONDARY TARGET: a future Tablet Compact version derived from the same authoritative project lineage.
 - CURRENT BROWSER BUILD: development/prototyping runtime only; Safari/WebKit is not the architectural authority for the final audio engine.
-- NEXT DEVELOPMENT PHASE: await the explicit M14 brief. Do not infer or begin later roadmap work from the M12–M13 acceptance.
+- NEXT DEVELOPMENT PHASE: begin the next explicitly briefed milestones in a fresh context after the authorised M14 hard save. Do not infer their scope from M14.
 - Do not create Safari-, Chromium-, desktop-, or tablet-specific duplicate project engines. A future hosted/browser product would require its own separately approved architecture.
 
 The accepted local audio configuration uses native Web Audio compression/sample fencing plus a colour-coded layered endpoint waveform at a bounded 30 Hz visual rate. The custom AudioWorklet implementation is preserved, but Safari testing isolated it as the source of progressive crackle/latency and delayed transport. Worklet master-meter reporting, non-finite latching and the eventual offline desktop safety boundary are deferred for a later explicit decision. Channel deletion now uses a non-blocking inline confirmation and preserves unrelated sounding channels.
@@ -436,3 +437,16 @@ M13 BASELINE FINGERPRINT — 2026-08-15
 - Eighth post-trial remediation: an individual can now be pulled free without the unplot/find/replot detour. Double-click any folder-list member to expose that endpoint as an immediately draggable live plot; the selected member can also be pulled with a double-click on the grid folder marker, and the marker defaults to the front endpoint when none is selected. The route remains live, the remaining occupants stay clustered, and the normal drag workflow commits the detached endpoint to its new coordinate. Browser coverage proves a selected list member can leave a moved three-endpoint cluster independently.
 - Verification: see `milestone_notes/milestone_13_musical_source_architecture.txt` for the full qualification and manual musical acceptance procedure.
 - Acceptance: the final user test found the workflow responsive and user-friendly, with no bad noise or misbehaving functions. M12–M13 is the authoritative GitHub baseline. Do not begin M14 without a new explicit brief.
+
+M14 APPROVED HARD-SAVE FINGERPRINT — 2026-08-21 (AMENDED)
+
+- Status: USER-ACCEPTED AND AUTHORISED FOR GITHUB PROMOTION on `agent/milestone-14` over M13 base `848457367c2b60a91f0e85bf7f03d7a43ade92c4`.
+- Product change: the earlier conventional simultaneous Chord interpretation is superseded and removed. A visible downstream Arpeggio now traverses 2–6 related pitches sequentially and persistently using one source oscillator. Square remains part of the pitched-generator family; microtonal traversal, Noise and Filter remain deferred.
+- User workflow: add/select a channel in the left menu, then add a generator and Arpeggio from the permanent `SOUND MODULES` top bar. Canvas/output ownership is `GENERATOR → ARPEGGIO → CHANNEL OUT → PLOTTED REFERENT`.
+- Controls: major, minor, fifths or octaves; 2–6 pitches; 160–2400 ms spacing; Up, Down or Up/Down. Edits and upstream base-pitch changes apply while running.
+- Timing: one audio oscillator is retained; a runtime-owned scheduler applies a short 18 ms release, pitch switch, then 32 ms attack. Transport pause freezes scheduling; Stop cancels the timer and resets traversal; restart resumes from the first pitch.
+- Ownership: Duplicate copies programming once into an independent performer and scheduler. Multi-Plot remains downstream spatial fan-out and never creates another oscillator or Arpeggio scheduler.
+- Verification completed before publication: quality TypeScript PASS; ESLint PASS; production build PASS; Node/model/runtime/render 96/96 PASS; fresh production server/browser smoke check PASS; Playwright production-browser and axe suite 20/20 PASS. Final hard-save evidence is recorded in the M14 engineering note.
+- Musical acceptance: the user completed several live sessions with multiple simultaneous sounds, Sound Desk live-edit movement and Arpeggio programming and reported the system working correctly. One rapid Arpeggio shuffle became silent once; deleting and recreating the Arpeggio recovered it, and the issue did not reproduce. This remains a low-severity observation for future recurrence tracking rather than a confirmed blocking defect.
+- Approval: on 2026-08-21 the user explicitly approved M14, authorised GitHub publication and requested the next two to three milestones begin in a fresh context.
+- Full details and conservative-volume manual listening procedure: `milestone_notes/milestone_14_arpeggio_pitch_traversal.txt`.

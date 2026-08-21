@@ -1,0 +1,99 @@
+RFE TEST ENGINE — MILESTONE 14 ARPEGGIO / PITCH-TRAVERSAL CANDIDATE
+Updated 2026-08-21 (Europe/London)
+
+STATUS
+
+- USER-ACCEPTED and authorised for GitHub hard-save promotion on 2026-08-21.
+- Branch: agent/milestone-14.
+- M13 base/HEAD before candidate work: 848457367c2b60a91f0e85bf7f03d7a43ade92c4.
+- M15 and unrelated roadmap work have not begun.
+
+SUPERSEDED CHORD
+
+The first M14 candidate reasonably implemented the then-stated conventional Chord requirement: one root pitch expanded to 2–6 simultaneous oscillators, each with the selected Sine/Triangle/Saw/Square timbre, strict 1/N family gain, live interval/transposition edits, independent Duplicate families and shared Multi-Plot endpoints. It was implemented in app/musical-source.ts, app/audio-runtime.ts, app/interaction-state.ts, app/page.tsx and app/globals.css with matching model, runtime and browser tests.
+
+The amended requirement is sequential pitch traversal, not simultaneous harmony. The Chord instruction, multi-oscillator runtime, controls, canvas module, styles and tests were removed rather than retained as disabled technical debt. The unrelated legacy dummy `Chord Trigger` was renamed `Pattern Trigger · UI ONLY` so it cannot be mistaken for the functional module.
+
+USER-FACING WORKFLOW
+
+1. Add or select a channel in the left Inputs & Channels menu.
+2. In the permanent SOUND MODULES top bar, add Sine, Triangle, Saw or Square.
+3. Add Arpeggio from the same top bar.
+4. The visible lineage is GENERATOR → ARPEGGIO → CHANNEL OUT → PLOTTED REFERENT.
+5. Select Arpeggio to enable/bypass it and edit pattern, pitch count, rate and direction live.
+6. Start the source and Play transport. The performer repeats until paused, stopped, muted, disconnected or removed.
+
+PITCH AND TIMING MODEL
+
+- Patterns are bounded semitone families: Major 0/4/7/12/16/19, Minor 0/3/7/12/15/19, Fifths 0/7/12/19/24/31 and Octaves 0/12/24/36/48/60.
+- Pitch count is 2–6. Direction is Up, Down or Up/Down; Up/Down avoids repeating the end points when reversing.
+- Rate is live and bounded from 160 ms to 2400 ms, allowing clearly separated pitches.
+- One persistent oscillator retains the upstream waveform. No hidden synthesizer and no overlapping sustained Chord voices are created.
+- Each transition schedules an 18 ms envelope release, changes oscillator frequency, then applies a 32 ms attack. This supplies distinct articulation without a hard discontinuity or amplitude multiplication.
+- The runtime scheduler, not React rendering or animation frames, owns continued traversal.
+- Pause cancels the pending timer while retaining the current performer. Play resumes it. Stop cancels traversal and resets the next performance to the first pitch. Removal and disposal cancel timers and oscillator ownership cleanly.
+
+OWNERSHIP
+
+- Duplicate copies generator and Arpeggio programming once, then owns an independent oscillator, scheduler and future edits.
+- Multi-Plot remains endpoint/spatial fan-out. Every plot shares the one source performer, so additional plots do not create oscillators or Arpeggio schedulers.
+- Existing AudioContext, family delivery, Plot Point Folder, dragging, routing and safety architecture were consumed without redesign.
+
+SCOPE
+
+- Ordinary persistent Arpeggio is implemented.
+- Microtonal/intermediate step resolution is deferred to avoid destabilising the first performer model.
+- Loop is not involved; persistence is intrinsic to the performer.
+- No sequencer, piano roll, MIDI, scale/key engine, advanced harmony, recording, Auto Plot, Orchestra, Noise, Filter or M15 work was added.
+
+VERIFICATION
+
+- Quality TypeScript project: PASS.
+- ESLint: PASS.
+- vinext production build: PASS.
+- Node model/runtime/render/system suite: PASS, 96/96.
+- Focused tests cover visible/canonical Arpeggio construction, sequential traversal, persistent cycling, live rate/pattern/direction/base-pitch edits, single-oscillator ownership, articulation, transport cancellation/reset, removal, Duplicate independence, Multi-Plot sharing and multi-performer clear/rebuild cleanup.
+- Fresh production server/in-app-browser smoke qualification: PASS. The rebuilt application loaded on port 3002, exposed Arpeggio in the permanent Sound Modules selector and produced no captured browser console errors.
+- Final Playwright production-browser suite: PASS, 20/20, including the real Arpeggio workflow, dense M12/M13 regression journeys and axe serious/critical accessibility scan. Two obsolete test selectors still expected module creation inside the collapsible secondary toolbar; they were updated to assert the permanent Sound Modules top bar and the suite then passed in full.
+
+USER MUSICAL ACCEPTANCE — 2026-08-21
+
+- The user completed several sessions adding multiple sounds to the playing grid and moving them in Sound Desk live-edit mode; those workflows operated correctly.
+- Rapidly shuffling through Arpeggio controls caused one performer to become silent once. Deleting and recreating that Arpeggio restored it, and the behavior did not recur. Because it is non-reproducible and did not block the completed sessions, it is retained as a low-severity observation rather than a confirmed defect. If it recurs, capture the exact control sequence and inspect scheduler cancellation/recreation state before expanding scope.
+- The user explicitly approved M14, authorised GitHub publication, and requested the next two to three milestones be developed in a fresh context.
+
+MANUAL ACCEPTANCE
+
+Begin at conservative listening volume using a fresh build/server and browser context.
+
+1. Add CH 01 from the left if needed; select it, then add Sine and Arpeggio from SOUND MODULES.
+2. Confirm the canvas reads Sine → Arpeggio → Channel Out and the output can be plotted in Sound Desk.
+3. Set Sine to about 220 Hz, start it and press Play. Confirm a repeating series of distinct pitches rather than a held Chord.
+4. Move Rate from fast toward 1200–2000 ms and confirm pitches become clearly separated immediately.
+5. Change Major/Minor/Fifths/Octaves, pitch count and Up/Down/Up-Down; confirm the performance changes live.
+6. Change the Sine base pitch and confirm the whole relationship transposes while retaining Sine timbre. Repeat briefly with Triangle, Saw and Square.
+7. Duplicate the programmed performer, alter only one Arpeggio and confirm independent sound/programming.
+8. Add several Multi-Plots and confirm spatial fan-out without audible performer multiplication.
+9. Pause, resume and Stop; confirm pitch activity freezes/resumes and Stop ends it cleanly. Remove/bypass Arpeggio and confirm the generator returns to one static pitch.
+
+FILES CHANGED
+
+- app/musical-source.ts
+- app/audio-runtime.ts
+- app/channel-routing.ts
+- app/interaction-state.ts
+- app/page.tsx
+- app/globals.css
+- tests/musical-source.test.mjs
+- tests/audio-runtime.test.mjs
+- tests/channel-routing.test.mjs
+- tests/interaction-state.test.mjs
+- tests/system-qualification.test.mjs
+- e2e/ui-quality-gate.spec.ts
+- README.md
+- HANDOVER.txt
+- milestone_notes/milestone_14_arpeggio_pitch_traversal.txt
+
+UX-FIRST ACCEPTANCE RULE
+
+A user-facing RFE capability is complete only when the intended user can find it, create it, connect or activate it, understand that it is active, control it, hear or see the expected result, change it live where appropriate, and remove or bypass it cleanly. Automated coverage should exercise that real pathway where practical; internal calculation tests alone are insufficient.

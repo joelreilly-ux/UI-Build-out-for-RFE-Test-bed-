@@ -78,6 +78,10 @@ function harness() {
   return { runtime, contexts, safetyNodes };
 }
 
+function sourceEnvelope(oscillator) {
+  return oscillator.connections[0].connections[0];
+}
+
 function id(sequence) {
   return `channel-${String(sequence).padStart(2, "0")}`;
 }
@@ -129,7 +133,7 @@ test("25-position fixture preserves 21 source families, one five-endpoint Clone 
     finalAnalyserCreations: 1,
   });
 
-  const cloneEnvelope = contexts[0].oscillators[0].connections[0];
+  const cloneEnvelope = sourceEnvelope(contexts[0].oscillators[0]);
   assert.equal(cloneEnvelope.connections.length, 5);
   const expectedFiveEndpointGain = 0.008 / 5;
   assert.equal(cloneEnvelope.connections.every((gain) => Math.abs(gain.gain.value - expectedFiveEndpointGain) < 1e-9), true);
@@ -185,7 +189,7 @@ test("Clone mutation renormalises without restart while Duplicate mutation remai
   for (let sequence = 6; sequence <= 10; sequence += 1) await runtime.startChannel(id(sequence));
   const sourceCreations = runtime.getDiagnostics().sourceCreations;
   runtime.disposeChannel(id(5));
-  const cloneEnvelope = contexts[0].oscillators[0].connections[0];
+  const cloneEnvelope = sourceEnvelope(contexts[0].oscillators[0]);
   assert.equal(cloneEnvelope.connections.length, 4);
   assert.equal(cloneEnvelope.connections.every((gain) => Math.abs(gain.gain.value - 0.04 / 4) < 1e-9), true);
   topology = qualificationTopology();
@@ -307,6 +311,58 @@ test("all 25 canonical grid positions retain one intended identity through movem
   assert.equal(coordinateKey(state.channels.find((channel) => channel.id === moved.id).assignment), coordinateKey(SPATIAL_COORDINATES[24]));
   state = spatialRoutingReducer(state, { type: "sync-channels", channels: channels.slice(1) });
   assert.equal(state.channels.some((channel) => channel.id === moved.id), false);
+});
+
+test("M14 mixed-density fixture distinguishes persistent Arpeggio performers from endpoints", async () => {
+  const { runtime, contexts, safetyNodes } = harness();
+  const topology = [
+    ...Array.from({ length: 6 }, (_, index) => ({ id: id(index + 1), sourceId: id(index + 1) })),
+    { id: "channel-04-plot-1", sourceId: id(4) },
+    { id: "channel-04-plot-2", sourceId: id(4) },
+    { id: "channel-05-plot-1", sourceId: id(5) },
+    { id: "channel-05-plot-2", sourceId: id(5) },
+    { id: "channel-05-plot-3", sourceId: id(5) },
+  ];
+  runtime.synchronizeTopology(topology);
+  ["sine", "triangle", "saw", "sine", "saw", "square"].forEach((generator, index) => runtime.setGenerator(id(index + 1), generator));
+  runtime.setArpeggioPattern(id(4), "major");
+  runtime.setArpeggioPattern(id(5), "minor");
+  runtime.setArpeggioPattern(id(6), "fifths");
+  [4, 5, 6].forEach((sequence) => { runtime.setArpeggioPitchCount(id(sequence), sequence - 1); runtime.setArpeggioEnabled(id(sequence), true); });
+  for (let sequence = 1; sequence <= 6; sequence += 1) await runtime.startChannel(id(sequence));
+
+  assert.equal(contexts.length, 1);
+  assert.equal(safetyNodes.length, 1);
+  assert.equal(runtime.getDiagnostics().activeSources, 6);
+  assert.equal(runtime.getDiagnostics().activeChannels, 11);
+  assert.equal(runtime.getDiagnostics().activeGeneratorVoices, 6);
+  assert.equal(runtime.getDiagnostics().activeArpeggioPerformers, 3);
+  assert.equal(runtime.getDiagnostics().generatorVoiceCreations, 6);
+  assert.equal(contexts[0].oscillators.length, 6);
+  assert.equal(runtime.getChannelSnapshot("channel-05-plot-3").activeGeneratorVoices, 1);
+
+  runtime.setPitch(id(6), 330);
+  runtime.setArpeggioRate(id(4), 1_200);
+  assert.equal(runtime.getDiagnostics().activeSources, 6);
+  assert.equal(runtime.getDiagnostics().activeGeneratorVoices, 6);
+  runtime.synchronizeTopology([]);
+  assert.equal(runtime.getDiagnostics().activeSources, 0);
+  assert.equal(runtime.getDiagnostics().activeGeneratorVoices, 0);
+  assert.equal(runtime.getDiagnostics().knownSources, 0);
+
+  runtime.synchronizeTopology([{ id: id(1), sourceId: id(1) }]);
+  runtime.setGenerator(id(1), "square");
+  runtime.setArpeggioPattern(id(1), "octaves");
+  runtime.setArpeggioPitchCount(id(1), 2);
+  runtime.setArpeggioEnabled(id(1), true);
+  await runtime.startChannel(id(1));
+  assert.equal(runtime.getDiagnostics().contextCreations, 1);
+  assert.equal(runtime.getDiagnostics().masterCreations, 1);
+  assert.equal(runtime.getDiagnostics().safetyCreations, 1);
+  assert.equal(runtime.getDiagnostics().activeSources, 1);
+  assert.equal(runtime.getDiagnostics().activeGeneratorVoices, 1);
+  assert.equal(runtime.getDiagnostics().activeArpeggioPerformers, 1);
+  runtime.stopChannel(id(1));
 });
 
 test("safety processor creation failure is fail-closed with no destination connection", async () => {

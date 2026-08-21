@@ -113,7 +113,7 @@ test("approved UI interaction journey remains coherent", async ({ page }) => {
   await expect(threadCount).toHaveCount(8);
 
   await length.locator(".module-body").click();
-  await page.getByText("Note / Chord", { exact: true }).click();
+  await page.getByText("Note / Pattern", { exact: true }).click();
   await page.getByRole("button", { name: "Mono" }).click();
   await expect(page.getByRole("button", { name: "Mono" })).toHaveClass(/active/);
   await page.getByLabel("Root Note").selectOption("G3");
@@ -154,8 +154,9 @@ test("approved UI interaction journey remains coherent", async ({ page }) => {
   await page.getByRole("button", { name: "Delete batch" }).click();
   await expect(page.locator(".module-card")).toHaveCount(10);
 
-  await page.getByLabel("Module type to add").selectOption("note-length");
-  await page.getByRole("button", { name: "Add module" }).click();
+  const moduleBar = page.getByRole("region", { name: "Channel sound modules" });
+  await moduleBar.getByLabel("Sound module to add").selectOption("note-length");
+  await moduleBar.getByRole("button", { name: "ADD MODULE" }).click();
   await expect(page.locator(".module-card")).toHaveCount(11);
   await page.getByLabel("Node name").fill("Review Timing");
   await expect(page.getByRole("button", { name: /Timing control Review Timing/ })).toBeVisible();
@@ -476,6 +477,88 @@ test("M13 Sine, Triangle, and Saw share pitch architecture while Duplicate and M
   expect((await runtimeState()).diagnostics.contextCreations).toBe(1);
 });
 
+test("M14 Arpeggio persists sequentially through the real module, Duplicate, transport, and Multi-Plot workflow", async ({ page }) => {
+  test.setTimeout(120_000);
+  await page.getByRole("button", { name: "CH 01 SINE · SILENT" }).click();
+  const moduleBar = page.getByRole("region", { name: "Channel sound modules" });
+  await expect(moduleBar).toContainText("GENERATOR → ARPEGGIO → CHANNEL OUT → PLOTTED REFERENT");
+  await moduleBar.getByLabel("Sound module to add").selectOption("sine-generator");
+  await moduleBar.getByRole("button", { name: "ADD MODULE" }).click();
+  await moduleBar.getByLabel("Sound module to add").selectOption("arpeggio-processor");
+  await moduleBar.getByRole("button", { name: "ADD MODULE" }).click();
+  const source = page.locator('[data-module-id^="pitched-generator-channel-01"]');
+  const arpeggio = page.locator('[data-module-id^="arpeggio-processor-channel-01"]');
+  await expect(arpeggio).toBeVisible();
+  await expect(arpeggio.getByRole("button", { name: "Output port for CH 01 Arpeggio" })).toBeVisible();
+  await expect(page.locator('.channel-terminal-source-tag[title="CH 01 receives CH 01 Arpeggio"]')).toBeVisible();
+  await expect(page.getByLabel("CH 01 functional Arpeggio processor")).toBeVisible();
+  await expect(page.getByLabel("CH 01 arpeggio pattern")).toHaveValue("major");
+  await expect(page.getByLabel("CH 01 arpeggio pitch count")).toHaveValue("3");
+  await expect(page.getByLabel("CH 01 arpeggio rate milliseconds")).toHaveValue("650");
+  await source.locator(".module-body").click();
+  await page.getByRole("slider", { name: "CH 01 sine frequency" }).fill("220");
+  await page.getByRole("button", { name: "CH 01 start sine signal" }).click();
+
+  const runtimeState = () => page.evaluate(() => {
+    const runtime = (window as typeof window & { __rfeAudioRuntime: {
+      getChannelSnapshot(id: string): { arpeggioEnabled: boolean; arpeggioPattern: string; arpeggioIntervals: number[]; arpeggioPitchCount: number; arpeggioRateMs: number; arpeggioDirection: string; arpeggioCurrentFrequency: number; arpeggioStepIndex: number; arpeggioCycleCount: number; arpeggioTimerActive: boolean; generatorType: string; activeGeneratorVoices: number };
+      getDiagnostics(): { activeSources: number; sourceCreations: number; activeGeneratorVoices: number; activeArpeggioPerformers: number; arpeggioStepEvents: number; generatorVoiceCreations: number; contextCreations: number; masterCreations: number; safetyCreations: number };
+      getSessionPlaybackState(): string;
+    } }).__rfeAudioRuntime;
+    return {
+      source: runtime.getChannelSnapshot("channel-01"),
+      duplicate: runtime.getChannelSnapshot("channel-02"),
+      plot: runtime.getChannelSnapshot("channel-01-plot-1"),
+      diagnostics: runtime.getDiagnostics(),
+      transport: runtime.getSessionPlaybackState(),
+    };
+  });
+  await expect.poll(async () => (await runtimeState()).diagnostics.arpeggioStepEvents).toBeGreaterThanOrEqual(2);
+  expect((await runtimeState()).source).toMatchObject({ generatorType: "sine", arpeggioEnabled: true, arpeggioIntervals: [0, 4, 7], activeGeneratorVoices: 1, arpeggioTimerActive: true });
+  expect((await runtimeState()).diagnostics).toMatchObject({ activeGeneratorVoices: 1, activeArpeggioPerformers: 1 });
+
+  await arpeggio.locator(".module-body").click();
+  await page.getByLabel("CH 01 arpeggio rate milliseconds").fill("1200");
+  await page.getByLabel("CH 01 arpeggio pattern").selectOption("minor");
+  await page.getByRole("button", { name: "DOWN", exact: true }).click();
+  expect((await runtimeState()).source).toMatchObject({ arpeggioPattern: "minor", arpeggioRateMs: 1200, arpeggioDirection: "down", arpeggioCurrentFrequency: 330, activeGeneratorVoices: 1 });
+  await source.locator(".module-body").click();
+  await page.getByRole("slider", { name: "CH 01 sine frequency" }).fill("440");
+  expect((await runtimeState()).source).toMatchObject({ arpeggioCurrentFrequency: 659, activeGeneratorVoices: 1 });
+
+  await source.locator(".module-body").click();
+  await page.getByRole("button", { name: "Duplicate", exact: true }).click();
+  const duplicate = page.locator('[data-module-id^="pitched-generator-channel-02"]');
+  const duplicateArpeggio = page.locator('[data-module-id^="arpeggio-processor-channel-02"]');
+  await expect(duplicateArpeggio).toBeVisible();
+  await duplicateArpeggio.getByRole("button", { name: "Output port for CH 02 Arpeggio" }).click();
+  await page.getByRole("button", { name: "CH 02 output terminal incomplete" }).click();
+  await duplicate.locator(".module-body").click();
+  await expect.poll(async () => (await runtimeState()).duplicate.arpeggioEnabled).toBe(true);
+  expect((await runtimeState()).duplicate).toMatchObject({ arpeggioPattern: "minor", arpeggioRateMs: 1200, arpeggioDirection: "down" });
+  await page.getByRole("button", { name: "CH 02 start sine signal" }).click();
+  await expect.poll(async () => (await runtimeState()).diagnostics.activeArpeggioPerformers).toBe(2);
+  await arpeggio.locator(".module-body").click();
+  await page.getByLabel("CH 01 arpeggio rate milliseconds").fill("1600");
+  expect((await runtimeState()).source.arpeggioRateMs).toBe(1600);
+  expect((await runtimeState()).duplicate.arpeggioRateMs).toBe(1200);
+
+  const beforePlot = (await runtimeState()).diagnostics;
+  await page.getByRole("button", { name: "Go to Sound Desk" }).click();
+  await page.getByRole("button", { name: "CH 01 · complete and routable" }).click();
+  await page.getByRole("button", { name: /MULTI-PLOT/ }).click();
+  await expect.poll(async () => (await runtimeState()).plot.arpeggioEnabled).toBe(true);
+  expect((await runtimeState()).plot).toMatchObject({ arpeggioPattern: "minor", arpeggioRateMs: 1600, activeGeneratorVoices: 1 });
+  expect((await runtimeState()).diagnostics).toMatchObject({ activeSources: 2, sourceCreations: beforePlot.sourceCreations, activeGeneratorVoices: 2, activeArpeggioPerformers: 2, generatorVoiceCreations: beforePlot.generatorVoiceCreations, contextCreations: 1, masterCreations: 1, safetyCreations: 1 });
+
+  const stepsBeforeStop = (await runtimeState()).diagnostics.arpeggioStepEvents;
+  await page.getByRole("button", { name: "Stop session" }).click();
+  expect((await runtimeState()).transport).toBe("stopped");
+  expect((await runtimeState()).source.arpeggioTimerActive).toBe(false);
+  await page.waitForTimeout(1_750);
+  expect((await runtimeState()).diagnostics.arpeggioStepEvents).toBe(stepsBeforeStop);
+});
+
 test("Inputs, workspace tools, and Monitor expand context without losing construction state", async ({ page }) => {
   await expect(page.locator(".input-channel-row")).toHaveCount(1);
   const canvas = page.getByRole("application", { name: "Audio module routing canvas" });
@@ -493,11 +576,14 @@ test("Inputs, workspace tools, and Monitor expand context without losing constru
   await page.getByRole("button", { name: "Expand Inputs and Channels" }).click();
   await expect(page.locator(".input-channel-row")).toHaveCount(1);
 
-  await expect(page.getByLabel("Module type to add")).toHaveCount(0);
+  await expect(page.getByLabel("Sound module to add")).toBeVisible();
+  await expect(page.getByLabel("Workspace width controls")).toHaveCount(0);
   await page.getByRole("button", { name: "More tools" }).click();
-  await expect(page.getByLabel("Module type to add")).toBeVisible();
+  await expect(page.getByLabel("Sound module to add")).toBeVisible();
+  await expect(page.getByLabel("Workspace width controls")).toBeVisible();
   await page.getByRole("button", { name: "Hide tools" }).click();
-  await expect(page.getByLabel("Module type to add")).toHaveCount(0);
+  await expect(page.getByLabel("Sound module to add")).toBeVisible();
+  await expect(page.getByLabel("Workspace width controls")).toHaveCount(0);
 });
 
 test("many channels remain readable, scrollable, and removable", async ({ page }) => {

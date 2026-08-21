@@ -14,7 +14,7 @@ export type ModuleMode = "mono" | "poly" | "arp";
 export type Selection = { kind: "module"; id: string; ids?: string[] } | { kind: "connection"; id: string } | { kind: "channel"; id: ChannelId } | null;
 export type CanvasTool = "select" | "pan";
 export type WorkspaceWidth = 100 | 150 | 200;
-export type ModuleTemplateType = "note-buttons" | "chord-trigger" | "custom-note" | "note-length" | "attack" | "release" | "seed-injection" | "sample-slots" | "particle-mapping";
+export type ModuleTemplateType = "sine-generator" | "triangle-generator" | "saw-generator" | "square-generator" | "arpeggio-processor" | "note-buttons" | "pattern-trigger" | "custom-note" | "note-length" | "attack" | "release" | "seed-injection" | "sample-slots" | "particle-mapping";
 
 export type ModuleParameters = {
   mode: ModuleMode;
@@ -86,7 +86,7 @@ export type AppAction =
   | { type: "select-module"; id: string; additive?: boolean }
   | { type: "select-connection"; id: string }
   | { type: "move-module"; id: string; position: { x: number; y: number } }
-  | { type: "add-module"; moduleType: ModuleTemplateType }
+  | { type: "add-module"; moduleType: ModuleTemplateType; channelId?: ChannelId }
   | { type: "rename-module"; id: string; title: string }
   | { type: "duplicate-selection" }
   | { type: "select-all-modules" }
@@ -103,6 +103,8 @@ export type AppAction =
   | { type: "clone-source"; sourceChannelId: ChannelId }
   | { type: "duplicate-source"; sourceChannelId: ChannelId }
   | { type: "set-source-generator"; sourceChannelId: ChannelId; generatorType: PitchedGeneratorType }
+  | { type: "add-source-arpeggio"; sourceChannelId: ChannelId }
+  | { type: "remove-source-arpeggio"; sourceChannelId: ChannelId }
   | { type: "delete-endpoint"; channelId: ChannelId }
   | { type: "delete-source-family"; sourceChannelId: ChannelId }
   | { type: "remove-channel"; channelId: ChannelId }
@@ -130,7 +132,7 @@ export type AppAction =
 
 export const DEFAULT_PARAMETERS: ModuleParameters = {
   mode: "poly",
-  noteSource: "Chord Trigger",
+  noteSource: "Pattern Trigger",
   rootNote: "C3",
   scale: "Minor Pentatonic",
   duration: "1/4",
@@ -145,7 +147,7 @@ export const DEFAULT_PARAMETERS: ModuleParameters = {
 
 const moduleDefinitions: Array<Omit<ModuleInstance, "parameters" | "accentId" | "ports"> & { parameters?: Partial<ModuleParameters> }> = [
   { id: "notes", type: "note-buttons", title: "Note Buttons", eyebrow: "Trigger source", kind: "source", enabled: true, position: { x: 5, y: 7 }, parameters: { rootNote: "C3" } },
-  { id: "chord", type: "chord-trigger", title: "Chord Trigger", eyebrow: "Trigger", kind: "control", enabled: true, position: { x: 33, y: 8 }, parameters: { mode: "poly" } },
+  { id: "pattern", type: "pattern-trigger", title: "Pattern Trigger", eyebrow: "Legacy UI trigger", kind: "control", enabled: true, position: { x: 33, y: 8 }, parameters: { mode: "poly" } },
   { id: "custom", type: "custom-note", title: "Custom Note", eyebrow: "Note source", kind: "source", enabled: true, position: { x: 7, y: 33 }, parameters: { rootNote: "C4" } },
   { id: "length", type: "note-length", title: "Note Length", eyebrow: "Timing control", kind: "control", enabled: true, position: { x: 37, y: 34 }, parameters: { duration: "1/4", swing: 54 } },
   { id: "attack", type: "attack", title: "Attack", eyebrow: "Envelope", kind: "control", enabled: true, position: { x: 69, y: 24 }, parameters: { duration: "10 ms" } },
@@ -168,11 +170,33 @@ const pitchedGeneratorDefinition: Omit<ModuleInstance, "parameters" | "accentId"
   generatorType: "sine",
 };
 
+const arpeggioProcessorDefinition: Omit<ModuleInstance, "parameters" | "accentId" | "ports"> & { parameters?: Partial<ModuleParameters> } = {
+  id: "arpeggio-processor",
+  type: "arpeggio-processor",
+  title: "Arpeggio",
+  eyebrow: "Pitch traversal",
+  kind: "control",
+  enabled: true,
+  position: { x: 12, y: 12 },
+  parameters: { status: "active" },
+};
+
 export function isPitchedGeneratorModule(module: Pick<ModuleInstance, "type">): boolean {
   return module.type === "pitched-generator" || module.type === "sine-source";
 }
 
-export const MODULE_LIBRARY = moduleDefinitions.filter((definition) => definition.enabled).map((definition) => ({ type: definition.type as ModuleTemplateType, title: definition.title }));
+export function isArpeggioProcessorModule(module: Pick<ModuleInstance, "type">): boolean {
+  return module.type === "arpeggio-processor";
+}
+
+export const MODULE_LIBRARY: Array<{ type: ModuleTemplateType; title: string }> = [
+  { type: "sine-generator", title: "Sine" },
+  { type: "triangle-generator", title: "Triangle" },
+  { type: "saw-generator", title: "Saw" },
+  { type: "square-generator", title: "Square" },
+  { type: "arpeggio-processor", title: "Arpeggio" },
+  ...moduleDefinitions.filter((definition) => definition.enabled && definition.type !== "pattern-trigger").map((definition) => ({ type: definition.type as ModuleTemplateType, title: definition.title })),
+];
 
 export function getSelectedModuleIds(selection: Selection): string[] {
   if (selection?.kind !== "module") return [];
@@ -191,7 +215,7 @@ export function createModule(definition: typeof moduleDefinitions[number], overr
 }
 
 const initialConnectionPairs = [
-  ["notes", "chord"], ["chord", "length"], ["custom", "length"], ["length", "attack"],
+  ["notes", "pattern"], ["pattern", "length"], ["custom", "length"], ["length", "attack"],
   ["length", "release"], ["seed", "slots"], ["slots", "mapping"], ["seed", "mapping"],
 ] as const;
 
@@ -208,7 +232,7 @@ export function createInitialState(): AppState {
   const channelTerminalConnections: ChannelTerminalConnection[] = [{
     id: "channel-output-1",
     channelId: threadChannels[0].id,
-    fromModuleId: "chord",
+    fromModuleId: "pattern",
   }];
   return {
     modules,
@@ -302,7 +326,8 @@ export function getModuleDisplay(module: ModuleInstance): { detail: string; valu
   if (!module.enabled) return { detail: "Architectural placeholder", value: "Unavailable" };
   switch (module.type) {
     case "note-buttons": return { detail: `${module.parameters.rootNote} · D3 · E3 · G3 · A3`, value: "5 inputs" };
-    case "chord-trigger": return { detail: module.parameters.scale, value: module.parameters.mode[0].toUpperCase() + module.parameters.mode.slice(1) };
+    case "pattern-trigger": return { detail: "Legacy interaction harness", value: "UI ONLY" };
+    case "arpeggio-processor": return { detail: module.audioChannelId?.replace("channel-", "CH ") ?? "UNBOUND", value: "TRAVERSAL" };
     case "custom-note": return { detail: `Humanize ${module.parameters.humanize}%`, value: module.parameters.rootNote };
     case "note-length": return { detail: `Swing ${module.parameters.swing}%`, value: module.parameters.duration };
     case "attack": case "release": return { detail: module.parameters.randomizeSeed ? "Linear" : "Fixed", value: module.parameters.duration };
@@ -367,6 +392,22 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       return withUpdate(state, { modules: state.modules.map((module) => movingIds.includes(module.id) ? { ...module, position: { x: module.position.x + boundedDx, y: module.position.y + boundedDy } } : module), statusMessage: movingIds.length > 1 ? `${movingIds.length} modules moved` : `${anchor.title} moved` });
     }
     case "add-module": {
+      const generatorType = ({ "sine-generator": "sine", "triangle-generator": "triangle", "saw-generator": "saw", "square-generator": "square" } as Partial<Record<ModuleTemplateType, PitchedGeneratorType>>)[action.moduleType];
+      if (generatorType) {
+        const channelId = action.channelId ?? (state.selection?.kind === "channel" ? state.selection.id : undefined);
+        const channel = state.threadChannels.find((item) => item.id === channelId && item.role !== "clone");
+        if (!channel) return withUpdate(state, { statusMessage: "Select a channel before adding a sound module" });
+        const existing = state.modules.find((module) => isPitchedGeneratorModule(module) && module.audioChannelId === channel.id);
+        if (!existing) return appReducer(state, { type: "place-channel-source", channelId: channel.id, generatorType });
+        const updated = appReducer(state, { type: "set-source-generator", sourceChannelId: channel.id, generatorType });
+        return withUpdate(updated, { selection: { kind: "module", id: existing.id }, statusMessage: `${channel.label} ${generatorLabel(generatorType)} module active` });
+      }
+      if (action.moduleType === "arpeggio-processor") {
+        const channelId = action.channelId ?? (state.selection?.kind === "channel" ? state.selection.id : undefined);
+        const channel = state.threadChannels.find((item) => item.id === channelId && item.role !== "clone");
+        if (!channel) return withUpdate(state, { statusMessage: "Select a channel before adding Arpeggio" });
+        return appReducer(state, { type: "add-source-arpeggio", sourceChannelId: channel.id });
+      }
       const definition = moduleDefinitions.find((module) => module.type === action.moduleType && module.enabled);
       if (!definition) return state;
       const instanceNumber = state.modules.filter((module) => module.type === action.moduleType).length + 1;
@@ -490,6 +531,8 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       const generatorType = normalizePitchedGeneratorType(sourceModule.generatorType);
       const generatorName = generatorLabel(generatorType);
       const id = `pitched-generator-${channel.id}-${crypto.randomUUID()}`;
+      const originArpeggio = state.modules.find((module) => isArpeggioProcessorModule(module) && module.audioChannelId === origin.id);
+      const hasArpeggio = Boolean(originArpeggio);
       const instance = createModule(pitchedGeneratorDefinition, {
         id,
         title: `${channel.label} ${generatorName}`,
@@ -500,7 +543,17 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         ports: { input: false, output: true },
         position: findSourcePlacement(state.modules, state.threadChannels.length),
       });
-      return withUpdate(state, { threadChannels: [...state.threadChannels, channel], modules: [...state.modules, instance], nextChannelSequence: sequence + 1, selection: { kind: "module", id }, pendingConnectionFrom: null, statusMessage: `${channel.label} duplicated from ${origin.label} — independent source, connect to any free Channel Out` });
+      const arpeggio = hasArpeggio ? createModule(arpeggioProcessorDefinition, {
+        id: `arpeggio-processor-${channel.id}-${crypto.randomUUID()}`,
+        title: `${channel.label} Arpeggio`,
+        audioChannelId: channel.id,
+        accentId: channel.accentId,
+        ports: { input: true, output: true },
+        parameters: { ...DEFAULT_PARAMETERS, status: originArpeggio?.parameters.status ?? "active" },
+        position: { x: Math.min(76, instance.position.x + 18), y: instance.position.y },
+      }) : null;
+      const connections = arpeggio ? [...state.connections, { id: `thread-${crypto.randomUUID()}`, fromModuleId: instance.id, toModuleId: arpeggio.id, fromPort: "out" as const, toPort: "in" as const }] : state.connections;
+      return withUpdate(state, { threadChannels: [...state.threadChannels, channel], modules: arpeggio ? [...state.modules, instance, arpeggio] : [...state.modules, instance], connections, nextChannelSequence: sequence + 1, selection: { kind: "module", id: arpeggio?.id ?? id }, pendingConnectionFrom: null, statusMessage: `${channel.label} duplicated from ${origin.label} — independent ${hasArpeggio ? `${generatorName} → Arpeggio performer; connect Arpeggio to a free Channel Out` : "source; connect it to any free Channel Out"}` });
     }
     case "set-source-generator": {
       const source = state.threadChannels.find((channel) => channel.id === action.sourceChannelId && channel.role !== "clone");
@@ -510,6 +563,43 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       return withUpdate(state, {
         modules: state.modules.map((module) => isPitchedGeneratorModule(module) && module.audioChannelId === source.id ? { ...module, generatorType, title: `${source.label} ${generatorName}` } : module),
         statusMessage: `${source.label} generator set to ${generatorName}`,
+      });
+    }
+    case "add-source-arpeggio": {
+      const sourceModule = state.modules.find((module) => isPitchedGeneratorModule(module) && module.audioChannelId === action.sourceChannelId);
+      const sourceChannel = state.threadChannels.find((channel) => channel.id === action.sourceChannelId && channel.role !== "clone");
+      if (!sourceModule || !sourceChannel) return withUpdate(state, { statusMessage: "Place a pitched generator before adding Arpeggio" });
+      const existing = state.modules.find((module) => isArpeggioProcessorModule(module) && module.audioChannelId === action.sourceChannelId);
+      if (existing) return withUpdate(state, { selection: { kind: "module", id: existing.id }, statusMessage: `${sourceChannel.label} Arpeggio selected` });
+      const arpeggio = createModule(arpeggioProcessorDefinition, {
+        id: `arpeggio-processor-${sourceChannel.id}-${crypto.randomUUID()}`,
+        title: `${sourceChannel.label} Arpeggio`,
+        audioChannelId: sourceChannel.id,
+        accentId: sourceChannel.accentId,
+        ports: { input: true, output: true },
+        position: { x: Math.min(76, sourceModule.position.x + 18), y: sourceModule.position.y },
+      });
+      const connection: ThreadConnection = { id: `thread-${crypto.randomUUID()}`, fromModuleId: sourceModule.id, toModuleId: arpeggio.id, fromPort: "out", toPort: "in" };
+      return withUpdate(state, {
+        modules: [...state.modules, arpeggio],
+        connections: [...state.connections, connection],
+        channelTerminalConnections: state.channelTerminalConnections.map((terminal) => terminal.fromModuleId === sourceModule.id ? { ...terminal, fromModuleId: arpeggio.id } : terminal),
+        selection: { kind: "module", id: arpeggio.id },
+        pendingConnectionFrom: null,
+        statusMessage: `${sourceChannel.label} lineage: ${sourceModule.title} → Arpeggio → Channel Out / plotted referent`,
+      });
+    }
+    case "remove-source-arpeggio": {
+      const sourceModule = state.modules.find((module) => isPitchedGeneratorModule(module) && module.audioChannelId === action.sourceChannelId);
+      const arpeggioIds = state.modules.filter((module) => isArpeggioProcessorModule(module) && module.audioChannelId === action.sourceChannelId).map((module) => module.id);
+      if (!arpeggioIds.length) return state;
+      return withUpdate(state, {
+        modules: state.modules.filter((module) => !arpeggioIds.includes(module.id)),
+        connections: state.connections.filter((connection) => !arpeggioIds.includes(connection.fromModuleId) && !arpeggioIds.includes(connection.toModuleId)),
+        channelTerminalConnections: state.channelTerminalConnections.map((terminal) => arpeggioIds.includes(terminal.fromModuleId) && sourceModule ? { ...terminal, fromModuleId: sourceModule.id } : terminal),
+        selection: state.modules.find((module) => isPitchedGeneratorModule(module) && module.audioChannelId === action.sourceChannelId) ? { kind: "module", id: state.modules.find((module) => isPitchedGeneratorModule(module) && module.audioChannelId === action.sourceChannelId)!.id } : null,
+        pendingConnectionFrom: null,
+        statusMessage: `${action.sourceChannelId.replace("channel-", "CH ")} Arpeggio removed; static-pitch path restored`,
       });
     }
     case "delete-endpoint": {
